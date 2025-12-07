@@ -1,0 +1,28 @@
+{
+  "name": "loansphere-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "LoanSphere backend scaffold (Node.js + Express + Oracle 21c XE)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "morgan": "^1.10.1",
+    "multer": "^1.4.5-lts.1",
+    "oracledb": "^6.4.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
