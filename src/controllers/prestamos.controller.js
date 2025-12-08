@@ -3,6 +3,10 @@ const service = require('../services/prestamos.service');
 module.exports = {
   crear: async (req, res) => {
     try {
+      // Si el usuario autenticado es PRESTATARIO, asegurar que crea el préstamo a su id
+      if (req.user && req.user.role === 'PRESTATARIO') {
+        req.body.id_prestatario = req.user.id_prestatario || req.user.ID_PRESTATARIO || req.user.id;
+      }
       const result = await service.crear(req.body);
       res.status(201).json({ ok: true, result });
     } catch (err) {

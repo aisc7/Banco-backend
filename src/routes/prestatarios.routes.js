@@ -5,37 +5,53 @@ const controller = require('../controllers/prestatarios.controller');
 const uploadPhoto = require('../middlewares/uploadPhoto');
 const validateCedula = require('../middlewares/validateCedula');
 const auditoria = require('../middlewares/auditoria');
+const auth = require('../middlewares/auth');
+const requireRole = require('../middlewares/requireRole');
+const allowEmployeeOrOwner = require('../middlewares/allowEmployeeOrOwner');
+const prestatariosModel = require('../models/prestatarios.model');
 
-// Registrar cliente
+// Registrar cliente (público)
 router.post('/', auditoria('PRESTATARIOS','INSERT'), validateCedula, controller.registrar);
 
-// Modificar cliente
-router.put('/:ci', auditoria('PRESTATARIOS','UPDATE'), controller.modificar);
+// Modificar cliente (empleado o propietario)
+router.put('/:ci', auth, allowEmployeeOrOwner(async (req) => {
+	const ci = Number(req.params.ci);
+	const r = await prestatariosModel.getByCedula(ci);
+	return r?.ID_PRESTATARIO || r?.id_prestatario || null;
+}), auditoria('PRESTATARIOS','UPDATE'), controller.modificar);
 
-// Eliminar cliente
-router.delete('/:ci', auditoria('PRESTATARIOS','DELETE'), controller.eliminar);
+// Eliminar cliente (solo empleados)
+router.delete('/:ci', auth, requireRole('EMPLEADO'), auditoria('PRESTATARIOS','DELETE'), controller.eliminar);
 
-// Subir fotografía (BLOB)
-router.post('/:ci/foto', auditoria('PRESTATARIOS','UPDATE'), uploadPhoto.single('foto'), controller.subirFoto);
+// Subir fotografía (BLOB) - empleado o propietario
+router.post('/:ci/foto', auth, allowEmployeeOrOwner(async (req) => {
+	const ci = Number(req.params.ci);
+	const r = await prestatariosModel.getByCedula(ci);
+	return r?.ID_PRESTATARIO || r?.id_prestatario || null;
+}), auditoria('PRESTATARIOS','UPDATE'), uploadPhoto.single('foto'), controller.subirFoto);
 
 // Validar duplicidad de cédula
 router.get('/validar/:ci', controller.validarCedula);
 
-// Obtener por cédula
-router.get('/:ci', controller.obtenerPorCedula);
+// Obtener por cédula (empleado o propietario)
+router.get('/:ci', auth, allowEmployeeOrOwner(async (req) => {
+	const ci = Number(req.params.ci);
+	const r = await prestatariosModel.getByCedula(ci);
+	return r?.ID_PRESTATARIO || r?.id_prestatario || null;
+}), controller.obtenerPorCedula);
 
-// Listar todos
-router.get('/', controller.listar);
+// Listar todos (solo empleados)
+router.get('/', auth, requireRole('EMPLEADO'), controller.listar);
 
-// Carga masiva desde CSV o TXT
-router.post('/carga', auditoria('LOG_CARGA_CLIENTES','INSERT'), controller.cargaMasiva);
+// Carga masiva desde CSV o TXT (solo empleados)
+router.post('/carga', auth, requireRole('EMPLEADO'), auditoria('LOG_CARGA_CLIENTES','INSERT'), controller.cargaMasiva);
 // Alias requerido por especificación (JSON o multipart)
-router.post('/carga-masiva', auditoria('LOG_CARGA_CLIENTES','INSERT'), uploadPhoto.single('archivo'), controller.cargaMasiva);
+router.post('/carga-masiva', auth, requireRole('EMPLEADO'), auditoria('LOG_CARGA_CLIENTES','INSERT'), uploadPhoto.single('archivo'), controller.cargaMasiva);
 
-// Obtener logs de carga masiva (alias adicional solicitado)
-router.get('/obtener-logs-carga', controller.obtenerLogsCarga);
+// Obtener logs de carga masiva (solo empleados)
+router.get('/obtener-logs-carga', auth, requireRole('EMPLEADO'), controller.obtenerLogsCarga);
 
 // Generación de logs de carga
-router.get('/cargas/logs', controller.obtenerLogsCarga);
+router.get('/cargas/logs', auth, requireRole('EMPLEADO'), controller.obtenerLogsCarga);
 
 module.exports = router;

@@ -11,6 +11,7 @@ const reportesRoutes = require('./routes/reportes.routes');
 const notificacionesRoutes = require('./routes/notificaciones.routes');
 const auditoriaRoutes = require('./routes/auditoria.routes');
 const empleadosRoutes = require('./routes/empleados.routes');
+const authRoutes = require('./routes/auth.routes');
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use('/api/reportes', reportesRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);
 app.use('/api/auditoria', auditoriaRoutes);
 app.use('/api/empleados', empleadosRoutes);
+app.use('/api/auth', authRoutes);
 
 // Boot Oracle pool when app starts (server.js awaits this)
 app.initDb = async () => {

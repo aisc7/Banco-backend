@@ -1,228 +1,171 @@
 # Banco-backend
 
-Backend REST para gestión de clientes, préstamos, cuotas, auditoría, reportes y notificaciones. Este documento describe TODOS los endpoints disponibles, casos de uso esenciales, contratos de entrada/salida, códigos de estado y recomendaciones de vistas para el frontend.
+Backend REST para gestión de clientes, préstamos, cuotas, auditoría, reportes y notificaciones.
+
+Este README amplía la documentación existente con detalles útiles para el equipo de frontend: cómo autenticarse, comportamiento de autorización, contratos de las rutas más importantes, ejemplos (PowerShell), variables de entorno necesarias, la lógica de negocio implementada y las pruebas que se han ejecutado.
 
 **Base URL**
+
 - `http://<host>:<port>`
 - Salud del servicio: `GET /health` → `{ "status": "ok" }`
 
 **Prefijo API**
+
 - Todos los endpoints están bajo `/api/*`.
 
-**Errores y formato de respuesta**
-- Respuestas exitosas: `{ ok: true, result: <datos> }` o campos específicos.
-- Errores de validación/reglas: `400 Bad Request` con `{ ok: false, error: <mensaje> }`.
-- Recurso no encontrado: `404 Not Found`.
-- Conflicto de duplicidad (cédula): `409 Conflict`.
-- Errores de servidor en notificaciones: `500 Internal Server Error`.
+**Formato de respuesta y errores**
 
-**Convenciones de datos**
+- Respuestas exitosas frecuentemente: `{ ok: true, result: <datos> }` o `{ success: true, data: <datos>, message: <texto> }` según controlador.
+- Errores de validación/reglas: `400 Bad Request` con `{ ok: false, error: <mensaje> }` o `{ success:false, data:null, message: <texto> }`.
+- `401 Unauthorized` → falta token o token inválido.
+- `403 Forbidden` → token válido pero sin permisos para la acción.
+- `404 Not Found` → recurso no encontrado.
+- `409 Conflict` → conflicto de duplicidad (p.ej., cédula).
+
+**Convenciones**
+
 - Fechas: `YYYY-MM-DD`.
-- Cédula (`ci`): Numérica.
-- Tipos de tasa/interés: `BAJA`, `MEDIA`, `ALTA`.
+- Cédula (`ci`): numérica.
 - Content-Type: `application/json` salvo donde se indique `multipart/form-data`.
 
-**Auditoría automática**
-- Muchas rutas aplican middleware de auditoría (`middlewares/auditoria.js`) que registra tabla y operación (`INSERT`/`UPDATE`/`DELETE`). No requiere acción del cliente.
+**Variables de entorno (mínimas necesarias)**
 
-**Módulos**
-- Prestatarios: `/api/prestatarios`
-- Préstamos: `/api/prestamos`
-- Cuotas: `/api/cuotas`
-- Reportes: `/api/reportes`
-- Notificaciones: `/api/notificaciones`
-- Auditoría: `/api/auditoria`
+- `DB_USER`, `DB_PASS`, `DB_HOST`, `DB_PORT`, `DB_SERVICE` → configuración de Oracle (ver `src/config/oracle.js`).
+- `PORT` → puerto donde corre la API (por defecto `3000`).
+- `JWT_SECRET` → clave para firmar tokens JWT (asegurar que no incluya caracteres problemáticos o espacios extra).
+- `JWT_EXPIRY` → tiempo de expiración del token (ej. `1h`).
+- `BCRYPT_SALT_ROUNDS` → rounds para `bcrypt` (ej. `10`).
 
----
+Coloca estas variables en un `.env` en la raíz o en tu entorno de ejecución.
 
-**Prestatarios**
-- `POST /api/prestatarios`
-	- Registrar cliente. Valida duplicidad de cédula.
-	- Body JSON ejemplo:
-		`{ "ci": 1234567890, "nombres": "Juan", "apellidos": "Pérez", "email": "juan@correo.com", "telefono": "3001234567", "direccion": "Calle 1" }`
-	- Respuestas: `201 Created` `{ ok: true, result }`; `409` si cédula duplicada.
-	- Posibles errores: `400` por datos inválidos.
-- `PUT /api/prestatarios/:ci`
-	- Modificar datos del cliente por cédula.
-	- Body: campos a actualizar.
-	- Respuestas: `200 OK` `{ ok: true, result }` o `400` por validación.
-- `DELETE /api/prestatarios/:ci`
-	- Eliminar cliente por cédula.
-	- Respuestas: `200 OK` `{ ok: true }` o `400` por errores.
-- `POST /api/prestatarios/:ci/foto`
-	- Subir fotografía del cliente.
-	- Soporta `multipart/form-data` con campo `foto` (archivo) o JSON con `foto_base64`.
-	- Respuestas: `200 OK` `{ ok: true, result }`; `400` si base64 inválido.
-- `GET /api/prestatarios/validar/:ci`
-	- Verifica si la cédula está duplicada.
-	- Respuesta: `{ duplicada: true|false }`.
-- `GET /api/prestatarios/:ci`
-	- Obtener datos de un cliente por cédula.
-	- Respuestas: `200 OK` `{ ok: true, result }` o `404` si no existe.
-- `GET /api/prestatarios`
-	- Listar todos los clientes.
-- `POST /api/prestatarios/carga`
-	- Carga masiva desde contenido CSV/TXT en JSON.
-	- Body JSON: `{ "content": "ci,nombres,apellidos,...\n...", "nombre_archivo": "carga.csv" }`.
-	- Respuesta: `202 Accepted` `{ ok: true, result }` (incluye resumen de carga/logs).
-- `POST /api/prestatarios/carga-masiva`
-	- Carga masiva vía `multipart/form-data` con campo `archivo` (CSV/TXT). Alias del anterior.
-- `GET /api/prestatarios/obtener-logs-carga`
-	- Obtener logs de cargas masivas.
-- `GET /api/prestatarios/cargas/logs`
-	- Alias para obtener logs de cargas.
+**Autenticación y autorización**
 
-**Préstamos**
-- `POST /api/prestamos`
-	- Crear préstamo. Genera número automático, asigna tasa por tipo y calcula cuotas/total. Controla máximo 2 préstamos activos por prestatario.
-	- Body JSON ejemplo:
-		`{ "ci": 1234567890, "monto": 1000000, "tipo": "MEDIA", "plazo_meses": 12 }`
-	- Respuestas: `201 Created` `{ ok: true, result }`; `400` por validación (p.ej., más de 2 activos).
-- `POST /api/prestamos/:idPrestamo/refinanciaciones`
-	- Registrar refinanciación de un préstamo.
-	- Body: datos de nueva condición (ej. nuevo plazo, tasa, etc.).
-	- Respuestas: `201 Created` `{ ok: true, result }` o `400` por reglas.
-- `GET /api/prestamos/prestatario/:ci`
-	- Listar préstamos de un prestatario por cédula.
-- `GET /api/prestamos`
-	- Listar todos los préstamos.
-- `GET /api/prestamos/:idPrestamo`
-	- Obtener préstamo por ID.
-	- Respuestas: `200 OK` `{ ok: true, result }` o `404` si no existe.
-- `PUT /api/prestamos/:idPrestamo`
-	- Actualizar campos permitidos (por ejemplo `estado`, `id_empleado`).
-	- Respuestas: `200 OK` `{ ok: true, result }` o `400` por validación.
-- `DELETE /api/prestamos/:idPrestamo`
-	- Cancelar/eliminar préstamo (marca estado `CANCELADO`).
-	- Respuestas: `200 OK` `{ ok: true, result }` o `400` por errores.
+- Login: `POST /api/auth/login` con body `{ "username": "...", "password": "..." }`.
+  - Respuesta exitosa: `{ success: true, data: { token: "<JWT>" }, message: "Autenticado" }`.
+  - El token es un JWT con payload: `{ id, username, role, id_prestatario?, iat, exp }`.
+- Roles soportados en el backend (mayores relevantes):
 
-**Cuotas**
-- `POST /api/cuotas/:idCuota/pagar`
-	- Registrar pago de una cuota (valida vencimiento y actualiza saldo/pendientes).
-	- Body JSON ejemplo: `{ "fecha_pago": "2025-12-01", "monto_pagado": 85000, "metodo": "EFECTIVO" }`.
-	- Respuestas: `201 Created` `{ ok: true, result }` o `400` por reglas de pago.
-- `GET /api/cuotas/prestatarios/:id/morosidad`
-	- Obtener indicadores de morosidad para un prestatario.
-- `POST /api/cuotas/prestatarios/:id/aplicar-penalizacion`
-	- Aplicar penalización por morosidad (opcional).
-	- Respuestas: `201 Created` `{ ok: true, result }` o `400` si no procede.
-- `GET /api/cuotas/prestatarios/:id/resumen-cuotas`
-	- Resumen de cuotas (pagadas/pendientes, valores, fechas) por prestatario.
-- `GET /api/cuotas/pendientes`
-	- Listar cuotas pendientes.
-- `GET /api/cuotas/morosas`
-	- Listar cuotas morosas.
+  - `EMPLEADO`: puede listar y operar sobre solicitudes y préstamos de forma global (acciones administrativas).
+  - `PRESTATARIO`: usuario cliente. Debe poder crear solicitudes de préstamo, ver y pagar sus propias cuotas y ver sus préstamos.
 
-**Reportes**
-- `GET /api/reportes/prestamos`
-	- Vista consolidada de préstamos: número, prestatario, total, cuotas, pagadas/pendientes, valores y fechas.
-- `GET /api/reportes/morosos`
-	- Reporte de morosos y DataCrédito (simulado).
-- `GET /api/reportes/refinanciaciones`
-	- Reporte de refinanciaciones activas.
+- Uso del token: enviar header `Authorization: Bearer <token>` en todas las peticiones a rutas protegidas.
 
-**Notificaciones**
-- `GET /api/notificaciones/pendientes`
-	- Listar notificaciones pendientes de envío.
-- `POST /api/notificaciones/enviar`
-	- Marcar envío masivo por tipo.
-	- Body JSON: `{ "tipo": "PAGO" | "MORA" | "CANCELACION" }`.
-	- Respuestas: `202 Accepted` `{ ok: true, result }` o `500` si falla proceso.
-- `POST /api/notificaciones/recordatorios-pago`
-	- Ejecutar procedimiento de recordatorios de pago.
-	- Respuestas: `202 Accepted` o `500`.
-- `POST /api/notificaciones/notificar-mora`
-	- Ejecutar procedimiento de aviso por mora.
-	- Respuestas: `202 Accepted` o `500`.
-- `POST /api/notificaciones/notificar-cancelacion`
-	- Ejecutar procedimiento de aviso por cancelación.
-	- Respuestas: `202 Accepted` o `500`.
-- `GET /api/notificaciones`
-	- Listar histórico de notificaciones.
+**Lógica de negocio principal**
 
-**Auditoría**
-- `POST /api/auditoria/registrar`
-	- Registrar auditoría de operación.
-	- Body JSON: `{ "usuario": "u1", "ip": "1.2.3.4", "dominio": "miapp", "tabla": "PRESTAMOS", "operacion": "INSERT", "descripcion": "detalle" }`.
-	- Respuesta: `201 Created` `{ ok: true, id_audit }`.
-- `POST /api/auditoria/finalizar`
-	- Finaliza sesión de auditoría.
-	- Body JSON: `{ "id_audit": 123 }`.
-	- Respuesta: `200 OK` `{ ok: true, id_audit }`.
+- Máximo 2 préstamos activos por prestatario: al crear un préstamo, se valida que el prestatario no tenga más de 2 préstamos en estado `ACTIVO`.
+- Cálculo de préstamo: al crear un préstamo se calcula `total` e `interés` según `tipo` (`BAJA`/`MEDIA`/`ALTA`) y se generan las `cuotas` con fecha de vencimiento y monto.
+- Pagos de cuota: `POST /api/cuotas/:idCuota/pagar` valida vencimiento/estado y marca la cuota como `PAGADA`, actualizando saldos/estados correspondientes.
+- Auditoría automática: la mayoría de los endpoints que hacen `INSERT`/`UPDATE`/`DELETE` registran la operación en la tabla de auditoría mediante el middleware `src/middlewares/auditoria.js`.
 
----
+**Requisitos en la base de datos (NOTAS importantes para integradores)**
 
-**Contratos resumidos (modelos esperados)**
-- `Prestatario`: `{ ci:number, nombres:string, apellidos:string, email?:string, telefono?:string, direccion?:string, foto?:blob/base64 }`
-- `Préstamo`: `{ id?:number, ci:number, monto:number, tipo:'BAJA'|'MEDIA'|'ALTA', plazo_meses:number, estado?:string, total?:number, cuotas?:number }`
-- `Cuota`: `{ id:number, id_prestamo:number, fecha_vencimiento:string, monto:number, estado:'PENDIENTE'|'PAGADA'|'MOROSA' }`
-- `Notificación`: `{ id:number, tipo:'PAGO'|'MORA'|'CANCELACION', enviado:'S'|'N', destino?:string, mensaje?:string }`
-- `Auditoría`: `{ id_audit:number, usuario:string, ip:string, dominio:string, tabla:string, operacion:string, inicio:string, fin?:string }`
+- Tabla `USUARIOS`: el sistema espera una tabla que contenga `username`, `password_hash`, `role`, `id_prestatario` (o `id_empleado` si aplica). El password se guarda usando `bcrypt`.
+- Para la entidad `EMPLEADOS`, el INSERT depende de que exista una secuencia/trigger o que el `id_empleado` sea provisto. Si ves `ORA-01400`, crea la secuencia y trigger para `id_empleado` o modifica el INSERT para recibir el id.
 
-**Ejemplos de respuesta**
-- Registro de préstamo (201):
-	`{ "ok": true, "result": { "id": 1, "numero": "PR-2025-0001", "ci": 1234567890, "monto": 1000000, "tipo": "MEDIA", "plazo_meses": 12, "total": 1150000, "cuotas": 12, "estado": "ACTIVO" } }`
-- Pago de cuota (201):
-	`{ "ok": true, "result": { "id_cuota": 1, "estado": "PAGADA", "fecha_pago": "2025-12-01", "monto_pagado": 85000, "saldo_restante": 0 } }`
+Ejemplo SQL (si usas Oracle y necesitas la secuencia/trigger):
+
+```sql
+CREATE SEQUENCE seq_empleados START WITH 1 INCREMENT BY 1;
+CREATE OR REPLACE TRIGGER trg_empleados_bi
+BEFORE INSERT ON empleados
+FOR EACH ROW
+BEGIN
+  IF :NEW.id_empleado IS NULL THEN
+	SELECT seq_empleados.NEXTVAL INTO :NEW.id_empleado FROM dual;
+  END IF;
+END;
+/
+-- Tabla usuarios ejemplo (simplificada)
+CREATE TABLE usuarios (
+  id_usuario NUMBER PRIMARY KEY,
+  username VARCHAR2(100) UNIQUE,
+  password_hash VARCHAR2(255),
+  role VARCHAR2(50),
+  id_prestatario NUMBER
+);
+```
+
+Genera las contraseñas con `bcrypt` y actualízalas en la DB; el backend usa `bcrypt.compare` para validar.
+
+**Endpoints más relevantes (resumen para frontend)**
+
+- `POST /api/auth/login` — Login, recibe `{ username, password }` y devuelve `{ token }`.
+- `GET /api/prestamos` — Lista todos los préstamos (requiere `EMPLEADO`).
+- `GET /api/prestamos/prestatario/:ci` — Lista préstamos de un prestatario por cédula (requiere autenticación; prestatario ve sus propios préstamos).
+- `POST /api/prestamos` — Crear préstamo (normalmente lo hace un prestatario solicitando el crédito; la aprobación puede requerir un `EMPLEADO`).
+- `PUT /api/prestamos/:idPrestamo` — Actualizar préstamo (e.g., `estado`, `id_empleado`).
+- `POST /api/cuotas/:idCuota/pagar` — Registrar pago de cuota (autenticado; prestatario solo puede pagar sus cuotas).
+
+Hay más endpoints (prestatarios, notificaciones, reportes, auditoría). Ver `src/routes/` para la lista completa y contratos.
+
+**Ejemplos de uso (PowerShell)**
+
+1. Login empleado
+
+```powershell
+$body = @{ username = 'empleado1'; password = 'soyempleado' } | ConvertTo-Json
+$resp = Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/auth/login' -ContentType 'application/json' -Body $body
+$token = $resp.data.token
+Write-Output $token
+```
+
+2. Petición protegida con token (empleado)
+
+```powershell
+$headers = @{ Authorization = "Bearer $token" }
+$all = Invoke-RestMethod -Method Get -Uri 'http://localhost:3000/api/prestamos' -Headers $headers
+$all | ConvertTo-Json -Depth 6 | Write-Output
+```
+
+3. Petición sin token (debe devolver 401)
+
+```powershell
+try { Invoke-RestMethod -Method Get -Uri 'http://localhost:3000/api/prestamos' -ContentType 'application/json' } catch { Write-Output $_.Exception.Message }
+```
+
+4. Pago de cuota (cliente)
+
+```powershell
+$cliPayload = @{ fecha_pago = (Get-Date).ToString('yyyy-MM-dd'); monto_pagado = 85000; metodo = 'EFECTIVO' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/cuotas/123/pagar" -Headers @{ Authorization = "Bearer $clienteToken" } -ContentType 'application/json' -Body $cliPayload
+```
+
+**Protecciones implementadas y comportamiento probado**
+
+- Rutas protegidas: middleware verifica `Authorization` header con `Bearer <token>`.
+- Rol/propiedad:
+  - Sin token → `401 Unauthorized`.
+  - Token válido pero sin rol/permisos → `403 Forbidden`.
+  - `EMPLEADO` puede listar y ver todos los préstamos: `GET /api/prestamos` → `200 OK` (probado).
+  - `PRESTATARIO` (cliente) obtiene `403` al intentar listar todos los préstamos (probado).
+
+**Pruebas ejecutadas (resumen reproducible)**
+
+- El servidor estaba corriendo en `localhost:3000` durante las pruebas.
+- Test 1 — GET `/api/prestamos` sin token → `401 Unauthorized` (correcto).
+- Test 2 — POST `/api/auth/login` con `empleado1` / `soyempleado` → devuelve token JWT (correcto).
+- Test 3 — POST `/api/auth/login` con `cliente1` / `soyprestatario` → devuelve token JWT (correcto).
+- Test 4 — GET `/api/prestamos` con token de `EMPLEADO` → `200 OK` + lista de préstamos (correcto).
+- Test 5 — GET `/api/prestamos` con token de `PRESTATARIO` → `403 Forbidden` (correcto — el sistema impide listar globalmente a prestatarios).
+
+Si quieres, puedo añadir ejemplos concretos de payloads para ganar-estado (aprobar/rechazar préstamos), o un pequeño script de test e2e para PowerShell/Postman.
+
+**Consejos para el frontend**
+
+- Guardar token en memoria (o `localStorage`/secure cookie según política) y enviarlo en `Authorization` header.
+- Gestionar `401` redirigiendo a login; gestionar `403` mostrando mensaje de permisos insuficientes.
+- Validar datos antes de enviarlos: cédula numérica, fechas en `YYYY-MM-DD`, montos positivos.
+- Mostrar resultados de auditoría/errores devueltos por la API al usuario en los flujos administrativos.
 
 **Colección de pruebas (Postman)**
-- Archivo: `docs/api.postman_collection.json`
-- Variable `baseUrl`: por defecto `http://localhost:3000`
+
+- Archivo: `docs/api.postman_collection.json` (usar variable `baseUrl: http://localhost:3000`).
 
 ---
 
-**Casos de Uso Esenciales** (y endpoints relacionados)
-- Solicitud de préstamo por parte de un cliente: `POST /api/prestamos`
-- Pago oportuno o tardío de cuotas: `POST /api/cuotas/:idCuota/pagar` y consulta `GET /api/cuotas/morosas`
-- Clasificación de cliente moroso: `GET /api/cuotas/prestatarios/:id/morosidad`, `GET /api/cuotas/morosas`
-- Generación de extracto financiero mensual: `GET /api/cuotas/prestatarios/:id/resumen-cuotas`, `GET /api/reportes/prestamos`
-- Carga masiva de nuevos clientes: `POST /api/prestatarios/carga` o `POST /api/prestatarios/carga-masiva`, logs: `GET /api/prestatarios/cargas/logs`
-- Registro de refinanciación o nuevo préstamo: `POST /api/prestamos` y `POST /api/prestamos/:idPrestamo/refinanciaciones`
-- Envío de correo automático de recordatorio: `POST /api/notificaciones/recordatorios-pago` y `POST /api/notificaciones/enviar`
-- Auditoría de usuarios y operaciones realizadas: `POST /api/auditoria/registrar`, `POST /api/auditoria/finalizar`
+Si quieres que genere además:
 
----
+- Un archivo `docs/e2e-tests.ps1` con los pasos que ejecuté (login empleado/cliente, listar, crear préstamo, pagar cuota), lo genero y pruebo automáticamente en tu entorno.
+- Un ejemplo de componente React para login + uso de token.
 
-**Recomendación de Vistas del Frontend**
-- Gestión de Clientes
-	- Listado y búsqueda de prestatarios.
-	- Formulario de nuevo/edición de prestatario.
-	- Detalle de prestatario con foto (subida archivo o cámara), y validación de cédula.
-	- Carga masiva: pantalla para subir CSV/TXT y ver resultado y logs.
-- Gestión de Préstamos
-	- Formulario de solicitud de préstamo (monto, tipo, plazo) con cálculo de cuotas y validaciones (máx. 2 activos).
-	- Listado de préstamos por cliente y detalle de préstamo.
-	- Acción de refinanciación: formulario y historial por préstamo.
-- Gestión de Cuotas
-	- Calendario/listado de cuotas por préstamo/cliente con estado.
-	- Pantalla de pago de cuota (captura de monto y método, validación de vencimiento).
-	- Indicadores de morosidad por cliente y listado de cuotas morosas/pendientes.
-- Reportes
-	- Consolidado de préstamos (tabla con filtros y exportación).
-	- Reporte de morosos/DataCrédito (simulado).
-	- Reporte de refinanciaciones activas.
-- Notificaciones
-	- Bandeja de notificaciones pendientes e histórico.
-	- Acciones para ejecutar envíos masivos por tipo y recordatorios.
-- Auditoría y Seguridad
-	- Panel de auditoría básica: registro manual de operación y cierre de sesión (si aplica mostrar trazas por usuario/tabla).
-
----
-
-**Notas para Integración**
-- Content-Type según endpoint: usar `application/json` salvo donde se indique `multipart/form-data`.
-- Fechas en formato ISO `YYYY-MM-DD`.
-- Muchos endpoints generan auditoría automáticamente mediante middleware.
-
-**Buenas prácticas para el frontend**
-- Validar cédula con `GET /api/prestatarios/validar/:ci` antes de registrar.
-- Mostrar confirmaciones en operaciones 201/202 y manejar errores `{ ok:false, error }`.
-- Reintentar procesos de notificación solo si el backend devuelve `500` y no duplicar envíos.
-- Para cargas masivas, mostrar el log devuelto y permitir descarga.
-
-**Ejecución**
-- Instalar dependencias y ejecutar servidor:
-	```powershell
-	npm install
-	npm run start
-	```
+Dime cuál de estas opciones prefieres y lo agrego.
