@@ -11,6 +11,9 @@ module.exports = {
   obtenerPorPrestatario: async (ci) => {
     return model.findByPrestatario(ci);
   },
+  obtenerPorPrestatarioPorId: async (id_prestatario) => {
+    return model.findByPrestatarioId(id_prestatario);
+  },
   listar: async () => {
     return model.findAll();
   },

@@ -94,6 +94,58 @@ module.exports = {
     }
   },
 
+  // 3b. Obtener préstamos por id_prestatario (usado cuando el PRESTATARIO consulta sus propios préstamos)
+  findByPrestatarioId: async (id_prestatario) => {
+    const conn = await getConnection();
+    try {
+      const qPrestatario = `SELECT ci FROM prestatarios WHERE id_prestatario = :id_prestatario`;
+      const rPrestatario = await conn.execute(
+        qPrestatario,
+        { id_prestatario },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      if (!rPrestatario.rows?.length) {
+        return { prestatario: null, prestamos: [], cuotas: [] };
+      }
+      const ci = rPrestatario.rows[0].CI ?? rPrestatario.rows[0].ci;
+
+      const qPrestamos = `
+        SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
+               p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
+        FROM PRESTAMOS p
+        WHERE p.ID_PRESTATARIO = :id_prestatario
+        ORDER BY p.ID_PRESTAMO DESC`;
+      const rPrestamos = await conn.execute(
+        qPrestamos,
+        { id_prestatario },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      const qCuotas = `
+        SELECT id_prestamo, nro_cuota, valor_cuota, saldo, estado, fecha_vencimiento
+        FROM vw_resumen_cuotas
+        WHERE id_prestamo IN (
+          SELECT p.id_prestamo FROM prestamos p WHERE p.id_prestatario = :id_prestatario
+        )
+        ORDER BY id_prestamo, nro_cuota`;
+      const rCuotas = await conn.execute(
+        qCuotas,
+        { id_prestatario },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      return {
+        prestatario: { id_prestatario, ci },
+        prestamos: rPrestamos.rows || [],
+        cuotas: rCuotas.rows || [],
+      };
+    } catch (err) {
+      throw new Error(err.message || 'Error obteniendo préstamos del prestatario');
+    } finally {
+      await conn.close();
+    }
+  },
+
   // Listar todos los préstamos
   findAll: async () => {
     const conn = await getConnection();

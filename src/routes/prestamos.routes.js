@@ -15,11 +15,21 @@ router.post('/', auth, auditoria('PRESTAMOS','INSERT'), controller.crear);
 router.post('/:idPrestamo/refinanciaciones', auditoria('SOLICITUDES_REFINANCIACION','INSERT'), controller.registrarRefinanciacion);
 
 // Obtener préstamos por prestatario (empleado o propietario)
-router.get('/prestatario/:ci', auth, allowEmployeeOrOwner(async (req) => {
-	const ci = Number(req.params.ci);
-	const info = await prestamosModel.findByPrestatario(ci);
-	return info.prestatario?.id_prestatario || null;
-}), controller.obtenerPorPrestatario);
+router.get(
+  '/prestatario/:ci',
+  auth,
+  allowEmployeeOrOwner(async (req) => {
+    // Empleado/Admin pasan siempre; este callback solo se evalúa para PRESTATARIO.
+    if (req.user && (req.user.role === 'PRESTATARIO')) {
+      return req.user.id_prestatario || req.user.ID_PRESTATARIO || null;
+    }
+    const ci = Number(req.params.ci);
+    if (!ci || Number.isNaN(ci)) return null;
+    const info = await prestamosModel.findByPrestatario(ci);
+    return info.prestatario?.id_prestatario || null;
+  }),
+  controller.obtenerPorPrestatario
+);
 
 // Listar todos los préstamos (solo empleados)
 router.get('/', auth, requireRole('EMPLEADO'), controller.listar);

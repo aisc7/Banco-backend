@@ -1,13 +1,26 @@
 const service = require('../services/prestamos.service');
 
+const inferTipoInteresFromCuotas = (nro_cuotas) => {
+  const n = Number(nro_cuotas);
+  if (!Number.isFinite(n)) return undefined;
+  if (n <= 12) return 'BAJA';
+  if (n <= 24) return 'MEDIA';
+  return 'ALTA';
+};
+
 module.exports = {
   crear: async (req, res) => {
     try {
+      const payload = { ...req.body };
+
       // Si el usuario autenticado es PRESTATARIO, asegurar que crea el préstamo a su id
+      // e inferir automáticamente el tipo de interés según el número de cuotas.
       if (req.user && req.user.role === 'PRESTATARIO') {
-        req.body.id_prestatario = req.user.id_prestatario || req.user.ID_PRESTATARIO || req.user.id;
+        payload.id_prestatario = req.user.id_prestatario || req.user.ID_PRESTATARIO || req.user.id;
+        payload.tipo_interes = inferTipoInteresFromCuotas(payload.nro_cuotas);
       }
-      const result = await service.crear(req.body);
+
+      const result = await service.crear(payload);
       res.status(201).json({ ok: true, result });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -23,10 +36,36 @@ module.exports = {
   },
   obtenerPorPrestatario: async (req, res) => {
     try {
-      const result = await service.obtenerPorPrestatario(Number(req.params.ci));
-      res.json({ ok: true, result });
+      const { user } = req;
+      const role = user?.role;
+      const idPrestatarioToken = user?.id_prestatario || user?.ID_PRESTATARIO || null;
+      const ciToken = user?.ci || user?.CI || null;
+
+      let ci = Number(req.params.ci);
+
+      // Si es PRESTATARIO, ignorar la cédula del path y usar la asociada al usuario
+      if (role === 'PRESTATARIO') {
+        if (ciToken) {
+          ci = Number(ciToken);
+        } else if (idPrestatarioToken) {
+          const resultById = await service.obtenerPorPrestatarioPorId(idPrestatarioToken);
+          return res.json({ ok: true, result: resultById });
+        }
+      }
+
+      if (!ci || Number.isNaN(ci)) {
+        return res.status(400).json({ ok: false, error: 'Cédula inválida' });
+      }
+
+      const result = await service.obtenerPorPrestatario(ci);
+      return res.json({ ok: true, result });
     } catch (err) {
-      res.status(400).json({ ok: false, error: err.message });
+      // eslint-disable-next-line no-console
+      console.error('Error GET /api/prestamos/prestatario/:ci', err);
+      return res.status(500).json({
+        ok: false,
+        error: 'Error consultando préstamos del prestatario',
+      });
     }
   },
   listar: async (_req, res) => {
