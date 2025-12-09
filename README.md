@@ -42,13 +42,125 @@ Coloca estas variables en un `.env` en la raíz o en tu entorno de ejecución.
 
 - Login: `POST /api/auth/login` con body `{ "username": "...", "password": "..." }`.
   - Respuesta exitosa: `{ success: true, data: { token: "<JWT>" }, message: "Autenticado" }`.
-  - El token es un JWT con payload: `{ id, username, role, id_prestatario?, iat, exp }`.
+  - El token es un JWT con payload: `{ id, username, role, id_prestatario?, id_empleado?, iat, exp }`.
 - Roles soportados en el backend (mayores relevantes):
 
   - `EMPLEADO`: puede listar y operar sobre solicitudes y préstamos de forma global (acciones administrativas).
   - `PRESTATARIO`: usuario cliente. Debe poder crear solicitudes de préstamo, ver y pagar sus propias cuotas y ver sus préstamos.
 
 - Uso del token: enviar header `Authorization: Bearer <token>` en todas las peticiones a rutas protegidas.
+
+## Registro de usuarios (prestatarios y empleados)
+
+Además del login, el backend expone endpoints para realizar un registro completo que crea:
+
+1. El registro de dominio (`PRESTATARIOS` o `EMPLEADOS`).
+2. El usuario en la tabla `USUARIOS`, con `username`, `password_hash` (bcrypt), `role` e ID de la entidad asociada.
+
+> Nota: estos endpoints no requieren autenticación en este proyecto académico; el frontend añade una “palabra secreta” y validaciones adicionales en la UI.
+
+### `POST /api/auth/register-prestatario`
+
+- Crea un prestatario en `PRESTATARIOS` y un usuario asociado en `USUARIOS` con rol `PRESTATARIO`.
+- Body esperado (ejemplo):
+
+```json
+{
+  "username": "cliente_nuevo",
+  "password": "1234",
+  "prestatario": {
+    "ci": 1002635472,
+    "nombre": "Isabella",
+    "apellido": "Suarez",
+    "direccion": "Cra 3C #32A 12",
+    "email": "suarezisa34@gmail.com",
+    "telefono": "3001234567",
+    "fecha_nacimiento": "2000-01-01",
+    "estado_cliente": "ACTIVO",
+    "usuario_registro": "frontend"
+  }
+}
+```
+
+- Respuesta exitosa (`201 Created`):
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "username": "cliente_nuevo",
+      "role": "PRESTATARIO",
+      "id_prestatario": 42
+    },
+    "prestatario": {
+      "id_prestatario": 42,
+      "ci": 1002635472,
+      "nombre": "Isabella",
+      "apellido": "Suarez",
+      "direccion": "Cra 3C #32A 12",
+      "email": "suarezisa34@gmail.com",
+      "telefono": "3001234567",
+      "fecha_nacimiento": "2000-01-01",
+      "estado_cliente": "ACTIVO",
+      "fecha_registro": "2024-01-01 10:00:00",
+      "usuario_registro": "frontend"
+    }
+  },
+  "message": "Prestatario y usuario creados correctamente."
+}
+```
+
+- Errores típicos:
+  - `400 Bad Request` → campos requeridos faltantes.
+  - `409 Conflict` → cédula ya registrada o nombre de usuario duplicado.
+
+### `POST /api/auth/register-empleado`
+
+- Crea un empleado en `EMPLEADOS` y un usuario asociado en `USUARIOS` con rol `EMPLEADO`.
+- Body esperado (ajusta campos opcionales según tu modelo de empleados):
+
+```json
+{
+  "username": "empleado_nuevo",
+  "password": "1234",
+  "empleado": {
+    "nombre": "Ana",
+    "apellido": "Suarez",
+    "cargo": "Contabilidad",
+    "salario": null,
+    "edad": null
+  }
+}
+```
+
+- Respuesta exitosa (`201 Created`):
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "username": "empleado_nuevo",
+      "role": "EMPLEADO",
+      "id_empleado": 7
+    },
+    "empleado": {
+      "id_empleado": 7,
+      "nombre": "Ana",
+      "apellido": "Suarez",
+      "cargo": "Contabilidad",
+      "salario": null,
+      "edad": null
+    }
+  },
+  "message": "Empleado y usuario creados correctamente."
+}
+```
+
+- Errores típicos:
+  - `400 Bad Request` → campos obligatorios de empleado o credenciales incompletos.
+  - `409 Conflict` → nombre de usuario duplicado (u otra constraint de duplicidad en empleados).
 
 **Lógica de negocio principal**
 
