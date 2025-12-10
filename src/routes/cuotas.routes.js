@@ -35,4 +35,27 @@ router.get('/prestatarios/:id/resumen-cuotas', auth, allowEmployeeOrOwner(async 
 router.get('/pendientes', auth, requireRole('EMPLEADO'), controller.listarPendientes);
 router.get('/morosas', auth, requireRole('EMPLEADO'), controller.listarMorosas);
 
+// Listar cuotas por préstamo (empleado o dueño)
+router.get('/prestamo/:idPrestamo', auth, allowEmployeeOrOwner(async (req) => {
+	const idPrestamo = Number(req.params.idPrestamo);
+	if (!Number.isFinite(idPrestamo)) return null;
+	const conn = await getConnection();
+	try {
+		const q = `SELECT id_prestatario FROM prestamos WHERE id_prestamo = :id`;
+		const r = await conn.execute(q, { id: idPrestamo }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+		return r.rows?.[0]?.ID_PRESTATARIO || r.rows?.[0]?.id_prestatario || null;
+	} finally {
+		await conn.close();
+	}
+}), controller.listarPorPrestamo);
+
+// Listado global de cuotas (solo empleados)
+router.get('/', auth, requireRole('EMPLEADO'), controller.listarAll);
+
+// DEV-ONLY: marcar vencidas ahora (solo EMPLEADO)
+router.post('/dev/marcar-vencidas', auth, requireRole('EMPLEADO'), controller.marcarVencidasDev);
+
+// Estado moroso derivado por prestatario (EMPLEADO o dueño)
+router.get('/prestatarios/:id/estado-moroso', auth, allowEmployeeOrOwner(async (req) => Number(req.params.id)), controller.estadoMorosoDerivado);
+
 module.exports = router;

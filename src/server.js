@@ -24,6 +24,23 @@ const PORT = (() => {
       console.log(`LoanSphere backend listening on port ${PORT}`);
     });
 
+    // DEV-ONLY: tarea periódica para actualizar cuotas vencidas en tiempo real
+    if ((process.env.NODE_ENV || 'development') !== 'production') {
+      const { marcarVencidasDev } = require('./models/cuotas.model');
+      const intervalMs = Number(process.env.CUOTAS_DEV_MARK_INTERVAL_MS || '60000'); // por defecto 60s
+      console.log(`⏱️ Scheduler dev activo: marcar vencidas cada ${intervalMs} ms`);
+      setInterval(async () => {
+        try {
+          const r = await marcarVencidasDev();
+          if (r && typeof r.updated === 'number' && r.updated > 0) {
+            console.log(`⚙️ Dev: cuotas vencidas actualizadas: ${r.updated}`);
+          }
+        } catch (e) {
+          console.warn('Dev scheduler marcarVencidas error:', e && e.message);
+        }
+      }, intervalMs);
+    }
+
   } catch (err) {
     console.error("🔴 Error al iniciar el servidor o conectar a Oracle:", err);
     process.exit(1);

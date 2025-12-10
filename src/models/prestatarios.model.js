@@ -282,4 +282,23 @@ module.exports = {
       await conn.close();
     }
   },
+  listMorosos: async () => {
+    const conn = await getConnection();
+    try {
+      const q = `
+        SELECT p.ID_PRESTATARIO, p.CI, p.NOMBRE, p.APELLIDO, p.EMAIL, p.TELEFONO,
+               COUNT(c.ID_CUOTA) AS CUOTAS_VENCIDAS
+        FROM PRESTATARIOS p
+        JOIN CUOTAS c ON c.ID_PRESTATARIO = p.ID_PRESTATARIO
+        WHERE c.ESTADO <> 'PAGADA' AND c.FECHA_VENCIMIENTO < SYSDATE
+        GROUP BY p.ID_PRESTATARIO, p.CI, p.NOMBRE, p.APELLIDO, p.EMAIL, p.TELEFONO
+        ORDER BY CUOTAS_VENCIDAS DESC`;
+      const r = await conn.execute(q, {}, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      return r.rows || [];
+    } catch (err) {
+      throw new Error(err.message || 'Error listando morosos');
+    } finally {
+      await conn.close();
+    }
+  },
 };

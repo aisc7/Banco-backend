@@ -19,4 +19,16 @@ module.exports = {
   listarMorosas: async () => {
     return model.listarMorosas();
   },
+  listarPorPrestamo: async (idPrestamo) => {
+    return model.listarPorPrestamo(idPrestamo);
+  },
+  listarAll: async () => {
+    return model.listarAll();
+  },
+  marcarVencidasDev: async () => {
+    return model.marcarVencidasDev();
+  },
+  contarVencidasImpagas: async (idPrestatario) => {
+    return model.contarVencidasImpagas(idPrestatario);
+  },
 };

@@ -17,9 +17,9 @@ module.exports = {
       };
 
       const plsql = `BEGIN PAK_PRESTAMOS.PRO_CREAR_PRESTAMO(:p_id_prestatario, :p_monto, :p_nro_cuotas, :p_tipo_interes, :p_id_empleado, :p_out_id); END;`;
-      await conn.execute(plsql, binds, { autoCommit: true });
+      const r = await conn.execute(plsql, binds, { autoCommit: true });
 
-      const id_prestamo = binds.p_out_id;
+      const id_prestamo = r.outBinds?.p_out_id?.[0] ?? null;
       return { id_prestamo };
     } catch (err) {
       // Superficial mapping: if Oracle enforces max 2 activos, bubble up message
@@ -27,6 +27,182 @@ module.exports = {
     } finally {
       await conn.close();
     }
+  },
+
+  // 1b. Crear préstamo dentro de una transacción existente (sin cerrar/autoCommit)
+  createPrestamoTransactional: async (conn, data) => {
+    const { id_prestatario, monto, nro_cuotas, tipo_interes, id_empleado } = data;
+    const binds = {
+      p_id_prestatario: id_prestatario,
+      p_monto: monto,
+      p_nro_cuotas: nro_cuotas,
+      p_tipo_interes: tipo_interes,
+      p_id_empleado: id_empleado ?? null,
+      p_out_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+    };
+    const plsql = `BEGIN PAK_PRESTAMOS.PRO_CREAR_PRESTAMO(:p_id_prestatario, :p_monto, :p_nro_cuotas, :p_tipo_interes, :p_id_empleado, :p_out_id); END;`;
+    const r = await conn.execute(plsql, binds, { autoCommit: false });
+    const id_prestamo = r.outBinds?.p_out_id?.[0] ?? null;
+    if (!id_prestamo) throw new Error('No se obtuvo ID_PRESTAMO');
+    return { id_prestamo };
+  },
+
+  // 1c. Crear préstamo manualmente dentro de una transacción existente (sin paquete PL/SQL)
+  // Requiere: id_solicitud_prestamo, id_prestatario, monto, nro_cuotas, tipo_interes
+  createPrestamoManualTransactional: async (conn, data) => {
+    const { id_solicitud_prestamo, id_prestatario, monto, nro_cuotas, tipo_interes } = data;
+    // Cálculo simple de interés y total
+    const rateMap = { BAJA: 0.05, MEDIA: 0.10, ALTA: 0.15 };
+    const rate = rateMap[(tipo_interes || 'MEDIA').toUpperCase()] ?? rateMap.MEDIA;
+    const interes = Math.round(monto * rate);
+    const total_prestado = monto + interes;
+    // Fechas
+    const rFecha = await conn.execute(`SELECT SYSDATE AS F FROM DUAL`, {}, { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false });
+    const fecha_emision = rFecha.rows?.[0]?.F;
+    // Para fecha_vencimiento, asumimos +nro_cuotas meses desde emisión
+    const rVenc = await conn.execute(
+      `SELECT ADD_MONTHS(SYSDATE, :n) AS FV FROM DUAL`,
+      { n: Number(nro_cuotas) },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false }
+    );
+    const fecha_vencimiento = rVenc.rows?.[0]?.FV;
+
+    // Insert préstamo; soportar secuencia y/o trigger con RETURNING
+    let id_prestamo;
+    try {
+      const sql = `INSERT INTO PRESTAMOS (
+          id_solicitud_prestamo, id_prestatario, total_prestado, nro_cuotas,
+          interes, fecha_emision, fecha_vencimiento, estado
+        ) VALUES (
+          :id_solicitud_prestamo, :id_prestatario, :total_prestado, :nro_cuotas,
+          :interes, :fecha_emision, :fecha_vencimiento, 'ACTIVO'
+        ) RETURNING id_prestamo INTO :id_out`;
+      const binds = {
+        id_solicitud_prestamo: Number(id_solicitud_prestamo),
+        id_prestatario: Number(id_prestatario),
+        total_prestado: Number(total_prestado),
+        nro_cuotas: Number(nro_cuotas),
+        interes: Number(interes),
+        fecha_emision,
+        fecha_vencimiento,
+        id_out: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+      };
+      const r = await conn.execute(sql, binds, { autoCommit: false });
+      id_prestamo = r.outBinds?.id_out?.[0];
+      if (!id_prestamo) throw new Error('No se obtuvo ID_PRESTAMO');
+    } catch (err) {
+      throw new Error(err.message || 'Error creando préstamo (manual)');
+    }
+
+    return { id_prestamo, total_prestado, interes, fecha_emision, fecha_vencimiento };
+  },
+
+  // 1d. Generar cuotas manualmente dentro de la misma transacción
+  generateCuotasTransactional: async (conn, args) => {
+    const { id_prestamo, id_prestatario, total_prestado, nro_cuotas } = args;
+    // Monto por cuota simple: dividir total por número de cuotas (redondeo básico)
+    const valor_cuota = Math.round(Number(total_prestado) / Number(nro_cuotas));
+    // Generar vencimientos: modo minutos en dev (base de 3 min), mensual en prod
+    const isProd = (process.env.NODE_ENV || 'development') === 'production';
+    const baseMinutes = Number(process.env.CUOTAS_MINUTES_BASE || (isProd ? '0' : '3'));
+    for (let i = 1; i <= Number(nro_cuotas); i++) {
+      let fv;
+      if (baseMinutes > 0) {
+        const minutes = baseMinutes * i; // 3, 6, 9, ...
+        const fractionOfDay = minutes / 1440;
+        const rV = await conn.execute(
+          `SELECT (SYSDATE + :days_fraction) AS FV FROM DUAL`,
+          { days_fraction: fractionOfDay },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false }
+        );
+        fv = rV.rows?.[0]?.FV;
+      } else {
+        const rV = await conn.execute(
+          `SELECT ADD_MONTHS(SYSDATE, :n) AS FV FROM DUAL`,
+          { n: i },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false }
+        );
+        fv = rV.rows?.[0]?.FV;
+      }
+      // Insert cuota con ID_CUOTA asignado por secuencia o trigger
+      const seqName = process.env.CUOTAS_SEQ_NAME || null;
+      let inserted = false;
+      if (seqName) {
+        // Usar secuencia del entorno
+        const getIdSql = `SELECT ${seqName}.NEXTVAL AS ID FROM DUAL`;
+        const rSeq = await conn.execute(getIdSql, {}, { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false });
+        const nextId = rSeq.rows?.[0]?.ID;
+        if (nextId) {
+          const sqlCuota = `INSERT INTO CUOTAS (
+              id_cuota, id_prestamo, id_prestatario, monto, nro_cuota, fecha_vencimiento, estado
+            ) VALUES (
+              :id_cuota, :id_prestamo, :id_prestatario, :monto, :nro_cuota, :fecha_vencimiento, 'PENDIENTE'
+            )`;
+          const bindsCuota = {
+            id_cuota: Number(nextId),
+            id_prestamo: Number(id_prestamo),
+            id_prestatario: Number(id_prestatario),
+            monto: Number(valor_cuota),
+            nro_cuota: i,
+            fecha_vencimiento: fv,
+          };
+          await conn.execute(sqlCuota, bindsCuota, { autoCommit: false });
+          inserted = true;
+        }
+      }
+      if (!inserted) {
+        // Intentar secuencias comunes; luego fallback a trigger + RETURNING
+        const trySeq = async (name) => {
+          try {
+            const rSeq = await conn.execute(
+              `SELECT ${name}.NEXTVAL AS ID FROM DUAL`,
+              {},
+              { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false }
+            );
+            const nextId = rSeq.rows?.[0]?.ID;
+            if (!nextId) return false;
+            const sqlCuota = `INSERT INTO CUOTAS (
+                id_cuota, id_prestamo, id_prestatario, monto, nro_cuota, fecha_vencimiento, estado
+              ) VALUES (
+                :id_cuota, :id_prestamo, :id_prestatario, :monto, :nro_cuota, :fecha_vencimiento, 'PENDIENTE'
+              )`;
+            const bindsCuota = {
+              id_cuota: Number(nextId),
+              id_prestamo: Number(id_prestamo),
+              id_prestatario: Number(id_prestatario),
+              monto: Number(valor_cuota),
+              nro_cuota: i,
+              fecha_vencimiento: fv,
+            };
+            await conn.execute(sqlCuota, bindsCuota, { autoCommit: false });
+            return true;
+          } catch (_) {
+            return false;
+          }
+        };
+        inserted = (await trySeq('CUOTAS_SEQ')) || (await trySeq('SEQ_CUOTAS'));
+        if (!inserted) {
+          // Fallback: confiar en trigger y usar RETURNING
+          const sqlCuota = `INSERT INTO CUOTAS (
+              id_prestamo, id_prestatario, monto, nro_cuota, fecha_vencimiento, estado
+            ) VALUES (
+              :id_prestamo, :id_prestatario, :monto, :nro_cuota, :fecha_vencimiento, 'PENDIENTE'
+            ) RETURNING id_cuota INTO :id_out`;
+          const bindsCuota = {
+            id_prestamo: Number(id_prestamo),
+            id_prestatario: Number(id_prestatario),
+            monto: Number(valor_cuota),
+            nro_cuota: i,
+            fecha_vencimiento: fv,
+            id_out: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+          };
+          const rIns = await conn.execute(sqlCuota, bindsCuota, { autoCommit: false });
+          const idCuota = rIns.outBinds?.id_out?.[0];
+          if (!idCuota) throw new Error('No se obtuvo ID_CUOTA');
+        }
+      }
+    }
+    return { valor_cuota };
   },
 
   // 2. Registrar refinanciación: consume PAK_PRESTAMOS.PRO_REGISTRAR_REFINANCIACION

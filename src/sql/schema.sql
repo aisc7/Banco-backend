@@ -94,6 +94,23 @@ CREATE TABLE SOLICITUDES_PRESTAMOS (
 );
 
 -- ==================================
+-- SECUENCIA Y TRIGGER PARA SOLICITUDES_PRESTAMOS
+-- ==================================
+-- Genera el ID de SOLICITUDES_PRESTAMOS automáticamente si no se provee.
+-- Ejecutar conectado como el propietario del esquema (p.ej., GERENTE).
+CREATE SEQUENCE SEQ_SOLICITUDES_PRESTAMOS START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+
+CREATE OR REPLACE TRIGGER TRG_SOLICITUDES_PRESTAMOS_BI
+BEFORE INSERT ON SOLICITUDES_PRESTAMOS
+FOR EACH ROW
+BEGIN
+    IF :NEW.id_solicitud_prestamo IS NULL THEN
+        SELECT SEQ_SOLICITUDES_PRESTAMOS.NEXTVAL INTO :NEW.id_solicitud_prestamo FROM dual;
+    END IF;
+END;
+/
+
+-- ==================================
 -- TABLA PRESTAMOS
 -- ==================================
 CREATE TABLE PRESTAMOS (

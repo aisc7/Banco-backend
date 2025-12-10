@@ -43,10 +43,15 @@ router.get('/:ci', auth, allowEmployeeOrOwner(async (req) => {
 // Listar todos (solo empleados)
 router.get('/', auth, requireRole('EMPLEADO'), controller.listar);
 
+// Listar morosos (solo empleados)
+router.get('/morosos', auth, requireRole('EMPLEADO'), controller.listarMorosos);
+
 // Carga masiva desde CSV o TXT (solo empleados)
 router.post('/carga', auth, requireRole('EMPLEADO'), auditoria('LOG_CARGA_CLIENTES','INSERT'), controller.cargaMasiva);
 // Alias requerido por especificación (JSON o multipart)
 router.post('/carga-masiva', auth, requireRole('EMPLEADO'), auditoria('LOG_CARGA_CLIENTES','INSERT'), uploadPhoto.single('archivo'), controller.cargaMasiva);
+// Alias adicional solicitado
+router.post('/upload-masivo', auth, requireRole('EMPLEADO'), auditoria('LOG_CARGA_CLIENTES','INSERT'), uploadPhoto.single('archivo'), controller.cargaMasiva);
 
 // Obtener logs de carga masiva (solo empleados)
 router.get('/obtener-logs-carga', auth, requireRole('EMPLEADO'), controller.obtenerLogsCarga);

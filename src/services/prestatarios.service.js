@@ -39,4 +39,7 @@ module.exports = {
   listar: async () => {
     return model.listAll();
   },
+  listarMorosos: async () => {
+    return model.listMorosos();
+  },
 };

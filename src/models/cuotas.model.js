@@ -117,4 +117,62 @@ module.exports = {
       await conn.close();
     }
   },
+  // 7. Listar cuotas por préstamo
+  listarPorPrestamo: async (idPrestamo) => {
+    const conn = await getConnection();
+    try {
+      const q = `
+        SELECT ID_CUOTA, ID_PRESTAMO, ID_PRESTATARIO, MONTO, NRO_CUOTA, FECHA_PAGO, FECHA_VENCIMIENTO, ESTADO
+        FROM CUOTAS
+        WHERE ID_PRESTAMO = :id
+        ORDER BY NRO_CUOTA ASC`;
+      const r = await conn.execute(q, { id: idPrestamo }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      return r.rows || [];
+    } catch (err) {
+      throw new Error(err.message || 'Error listando cuotas por préstamo');
+    } finally {
+      await conn.close();
+    }
+  },
+  listarAll: async () => {
+    const conn = await getConnection();
+    try {
+      const q = `SELECT ID_CUOTA, ID_PRESTAMO, ID_PRESTATARIO, MONTO, NRO_CUOTA, FECHA_PAGO, FECHA_VENCIMIENTO, ESTADO
+                 FROM CUOTAS
+                 ORDER BY FECHA_VENCIMIENTO DESC`;
+      const r = await conn.execute(q, {}, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      return r.rows || [];
+    } catch (err) {
+      throw new Error(err.message || 'Error listando todas las cuotas');
+    } finally {
+      await conn.close();
+    }
+  },
+  // DEV-ONLY: marcar vencidas en base a SYSDATE
+  marcarVencidasDev: async () => {
+    const conn = await getConnection();
+    try {
+      const q = `UPDATE CUOTAS SET ESTADO = 'VENCIDA' WHERE ESTADO = 'PENDIENTE' AND FECHA_VENCIMIENTO < SYSDATE`;
+      const r = await conn.execute(q, {}, { autoCommit: true });
+      return { updated: r.rowsAffected || 0 };
+    } catch (err) {
+      throw new Error(err.message || 'Error marcando cuotas vencidas (dev)');
+    } finally {
+      await conn.close();
+    }
+  },
+  // Contar vencidas impagas por prestatario
+  contarVencidasImpagas: async (idPrestatario) => {
+    const conn = await getConnection();
+    try {
+      const q = `SELECT COUNT(*) AS CNT FROM CUOTAS WHERE ID_PRESTATARIO = :id AND ESTADO = 'VENCIDA' AND FECHA_PAGO IS NULL`;
+      const r = await conn.execute(q, { id: idPrestatario }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const vencidasImpagas = (r.rows?.[0]?.CNT ?? r.rows?.[0]?.cnt ?? 0);
+      return { vencidasImpagas: Number(vencidasImpagas) };
+    } catch (err) {
+      throw new Error(err.message || 'Error contando vencidas impagas');
+    } finally {
+      await conn.close();
+    }
+  },
 };

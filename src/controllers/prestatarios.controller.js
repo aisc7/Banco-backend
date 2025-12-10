@@ -94,4 +94,12 @@ module.exports = {
       res.status(400).json({ ok: false, error: err.message });
     }
   },
+  listarMorosos: async (_req, res) => {
+    try {
+      const result = await service.listarMorosos();
+      res.json({ ok: true, result });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  },
 };

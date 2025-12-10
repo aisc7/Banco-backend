@@ -7,6 +7,7 @@ const oracle = require('./config/oracle');
 // Routes
 const prestatariosRoutes = require('./routes/prestatarios.routes');
 const prestamosRoutes = require('./routes/prestamos.routes');
+const solicitudesRoutes = require('./routes/solicitudes.routes');
 const cuotasRoutes = require('./routes/cuotas.routes');
 const reportesRoutes = require('./routes/reportes.routes');
 const notificacionesRoutes = require('./routes/notificaciones.routes');
@@ -15,6 +16,7 @@ const empleadosRoutes = require('./routes/empleados.routes');
 const authRoutes = require('./routes/auth.routes');
 
 const app = express();
+app.disable('etag');
 
 // Core middleware
 // Habilitar CORS antes de montar las rutas para permitir llamadas desde el frontend.
@@ -47,6 +49,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 // Mount modules
 app.use('/api/prestatarios', prestatariosRoutes);
 app.use('/api/prestamos', prestamosRoutes);
+app.use('/api/solicitudes', solicitudesRoutes);
 app.use('/api/cuotas', cuotasRoutes);
 app.use('/api/reportes', reportesRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);
