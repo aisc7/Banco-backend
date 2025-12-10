@@ -2,7 +2,11 @@ require("dotenv").config({ path: __dirname + "/../.env" });
 const app = require("./app");
 const db = require("./config/oracle");   
 
-const PORT = process.env.PORT || 3000;
+// Puerto robusto: si PORT no es numérico, usar 3000
+const PORT = (() => {
+  const p = Number(process.env.PORT);
+  return Number.isFinite(p) && p >= 0 && p < 65536 ? p : 3000;
+})();
 
 (async () => {
   try {

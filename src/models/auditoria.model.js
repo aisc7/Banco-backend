@@ -45,4 +45,32 @@ module.exports = {
       await conn.close();
     }
   },
+  listarLogs: async ({ usuario, operacion, tabla, limit = 100, offset = 0 }) => {
+    const conn = await getConnection();
+    try {
+      const binds = {};
+      const where = [];
+      if (usuario) { where.push('USUARIO = :p_usuario'); binds.p_usuario = usuario; }
+      if (operacion) { where.push('OPERACION = :p_operacion'); binds.p_operacion = operacion; }
+      if (tabla) { where.push('TABLA_AFECTADA = :p_tabla'); binds.p_tabla = tabla; }
+      const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      const sql = `
+        SELECT ID_AUDIT_PK, USUARIO, IP, DOMINIO,
+               FECHA_ENTRADA, FECHA_SALIDA,
+               TABLA_AFECTADA, OPERACION,
+               DURACION_SESION, DESCRIPCION
+        FROM LOG_AUDITORIA
+        ${whereSql}
+        ORDER BY FECHA_ENTRADA DESC
+        OFFSET :p_offset ROWS FETCH NEXT :p_limit ROWS ONLY`;
+      binds.p_offset = offset;
+      binds.p_limit = limit;
+      const result = await conn.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      return result.rows;
+    } catch (err) {
+      throw new Error(err.message || 'Error consultando LOG_AUDITORIA');
+    } finally {
+      await conn.close();
+    }
+  },
 };

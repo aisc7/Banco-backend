@@ -19,4 +19,13 @@ module.exports = {
       res.status(400).json({ ok: false, error: err.message });
     }
   },
+  listarLogs: async (req, res) => {
+    try {
+      const { usuario, operacion, tabla, limit, offset } = req.query;
+      const result = await service.listarLogs({ usuario, operacion, tabla, limit: Number(limit) || 100, offset: Number(offset) || 0 });
+      res.status(200).json({ ok: true, result });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  },
 };

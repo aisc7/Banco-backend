@@ -17,12 +17,23 @@ const authRoutes = require('./routes/auth.routes');
 const app = express();
 
 // Core middleware
-// Habilitar CORS antes de montar las rutas para permitir llamadas desde el frontend (Vite en 5173).
+// Habilitar CORS antes de montar las rutas para permitir llamadas desde el frontend.
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+  .split(',')
+  .map(o => o.trim());
+
 app.use(
   cors({
-    origin: 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    origin: function (origin, callback) {
+      // Permitir herramientas sin origin (curl/Postman) y orígenes en whitelist
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['X-Total-Count'],
     credentials: true
   })
 );

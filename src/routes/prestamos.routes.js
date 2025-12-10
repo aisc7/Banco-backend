@@ -34,6 +34,9 @@ router.get(
 // Listar todos los préstamos (solo empleados)
 router.get('/', auth, requireRole('EMPLEADO'), controller.listar);
 
+// Mis préstamos (solo prestatario autenticado)
+router.get('/mis-prestamos', auth, requireRole('PRESTATARIO'), controller.misPrestamos);
+
 // Obtener préstamo por ID (empleado o propietario)
 router.get('/:idPrestamo', auth, allowEmployeeOrOwner(async (req) => {
 	const id = Number(req.params.idPrestamo);

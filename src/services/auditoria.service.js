@@ -13,4 +13,7 @@ module.exports = {
   finalizarSesion: async (id_audit) => {
     return model.finalizarSesion(id_audit);
   },
+  listarLogs: async (filters) => {
+    return await model.listarLogs(filters);
+  },
 };

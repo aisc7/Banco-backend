@@ -64,12 +64,12 @@ module.exports = {
       const id_prestatario = rPrestatario.rows[0].ID_PRESTATARIO ?? rPrestatario.rows[0].id_prestatario;
 
       // 3.2 Obtener préstamos del prestatario
-      const qPrestamos = `
-        SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
-               p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
-        FROM PRESTAMOS p
-        WHERE p.ID_PRESTATARIO = :id_prestatario
-        ORDER BY p.ID_PRESTAMO DESC`;
+                        const qPrestamos = `
+                     SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
+                       p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
+                     FROM PRESTAMOS p
+                     WHERE p.ID_PRESTATARIO = :id_prestatario
+                     ORDER BY p.ID_PRESTAMO DESC`;
       const rPrestamos = await conn.execute(qPrestamos, { id_prestatario }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
       // 3.3 Resumen de cuotas por vista
@@ -80,7 +80,15 @@ module.exports = {
           SELECT p.id_prestamo FROM prestamos p WHERE p.id_prestatario = :id_prestatario
         )
         ORDER BY id_prestamo, nro_cuota`;
-      const rCuotas = await conn.execute(qCuotas, { id_prestatario }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      let rCuotas = { rows: [] };
+      try {
+        rCuotas = await conn.execute(qCuotas, { id_prestatario }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      } catch (err) {
+        // Tolerar errores en la vista/resumen de cuotas y devolver vacío para no romper la consulta de préstamos
+        // eslint-disable-next-line no-console
+        console.warn('Resumen de cuotas no disponible, devolviendo cuotas vacías:', err && err.message);
+        rCuotas = { rows: [] };
+      }
 
       return {
         prestatario: { id_prestatario, ci },
@@ -109,12 +117,12 @@ module.exports = {
       }
       const ci = rPrestatario.rows[0].CI ?? rPrestatario.rows[0].ci;
 
-      const qPrestamos = `
-        SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
-               p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
-        FROM PRESTAMOS p
-        WHERE p.ID_PRESTATARIO = :id_prestatario
-        ORDER BY p.ID_PRESTAMO DESC`;
+                        const qPrestamos = `
+                     SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
+                       p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
+                     FROM PRESTAMOS p
+                     WHERE p.ID_PRESTATARIO = :id_prestatario
+                     ORDER BY p.ID_PRESTAMO DESC`;
       const rPrestamos = await conn.execute(
         qPrestamos,
         { id_prestatario },
@@ -128,11 +136,19 @@ module.exports = {
           SELECT p.id_prestamo FROM prestamos p WHERE p.id_prestatario = :id_prestatario
         )
         ORDER BY id_prestamo, nro_cuota`;
-      const rCuotas = await conn.execute(
-        qCuotas,
-        { id_prestatario },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
+      let rCuotas = { rows: [] };
+      try {
+        rCuotas = await conn.execute(
+          qCuotas,
+          { id_prestatario },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+      } catch (err) {
+        // Tolerar cualquier error en la vista/resumen de cuotas y devolver vacío
+        // eslint-disable-next-line no-console
+        console.warn('Resumen de cuotas no disponible, devolviendo cuotas vacías:', err && err.message);
+        rCuotas = { rows: [] };
+      }
 
       return {
         prestatario: { id_prestatario, ci },

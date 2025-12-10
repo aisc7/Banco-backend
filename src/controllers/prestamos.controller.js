@@ -68,6 +68,20 @@ module.exports = {
       });
     }
   },
+  misPrestamos: async (req, res) => {
+    try {
+      const idPrestatario = req.user?.id_prestatario || req.user?.ID_PRESTATARIO || null;
+      if (!idPrestatario) {
+        return res.status(403).json({ ok: false, error: 'Cuenta no vinculada a prestatario' });
+      }
+      const result = await service.obtenerPorPrestatarioPorId(idPrestatario);
+      return res.json({ ok: true, result });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Error GET /api/prestamos/mis-prestamos', err);
+      return res.status(500).json({ ok: false, error: 'Error consultando préstamos del prestatario' });
+    }
+  },
   listar: async (_req, res) => {
     try {
       const result = await service.listar();
