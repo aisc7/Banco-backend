@@ -88,10 +88,9 @@ module.exports = {
         `UPDATE SOLICITUDES_PRESTAMOS
          SET estado = 'ACEPTADA',
              fecha_respuesta = SYSDATE,
-             id_empleado_decisor = :id_empleado_decisor,
-             fecha_decision = SYSDATE
+             id_empleado = :id_empleado
          WHERE id_solicitud_prestamo = :id`,
-        { id: idSolicitud, id_empleado_decisor: idEmpleadoDecisor ?? null },
+        { id: idSolicitud, id_empleado: idEmpleadoDecisor ?? null },
         { autoCommit: false }
       );
 
@@ -152,10 +151,9 @@ module.exports = {
         `UPDATE SOLICITUDES_PRESTAMOS
          SET estado = 'RECHAZADA',
              fecha_respuesta = SYSDATE,
-             id_empleado_decisor = :id_empleado_decisor,
-             fecha_decision = SYSDATE
+             id_empleado = :id_empleado
          WHERE id_solicitud_prestamo = :id`,
-        { id: idSolicitud, id_empleado_decisor: idEmpleadoDecisor ?? null },
+        { id: idSolicitud, id_empleado: idEmpleadoDecisor ?? null },
         { autoCommit: false }
       );
       await conn.commit();

@@ -123,9 +123,13 @@ module.exports = {
                         s.estado,
                         s.id_empleado AS id_empleado_decisor,
                         e.nombre AS empleado_decisor_nombre,
-                        e.apellido AS empleado_decisor_apellido
+                        e.apellido AS empleado_decisor_apellido,
+                        p.nombre AS prest_nombre,
+                        p.apellido AS prest_apellido,
+                        p.ci AS prest_ci
                  FROM SOLICITUDES_PRESTAMOS s
                  LEFT JOIN EMPLEADOS e ON e.id_empleado = s.id_empleado
+                 LEFT JOIN PRESTATARIOS p ON p.id_prestatario = s.id_prestatario
                  WHERE s.id_prestatario = :id
                  ORDER BY s.id_solicitud_prestamo DESC`;
       const r = await conn.execute(q, { id }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
@@ -171,23 +175,27 @@ module.exports = {
         binds.id_prestatario = Number(filters.id_prestatario);
       }
       const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-      const q = `SELECT s.id_solicitud_prestamo,
-                        s.id_prestatario,
-                        s.id_empleado,
-                        s.nro_cuotas,
-                        s.monto,
-                        s.fecha_envio,
-                        s.fecha_respuesta,
-                        s.estado,
-                        s.id_empleado AS id_empleado_decisor,
-                        e.nombre AS empleado_decisor_nombre,
-                        e.apellido AS empleado_decisor_apellido
-                 FROM SOLICITUDES_PRESTAMOS s
-                 LEFT JOIN EMPLEADOS e ON e.id_empleado = s.id_empleado
-                 ${where}
-                 ORDER BY s.id_solicitud_prestamo DESC`;
-      const r = await conn.execute(q, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-      return r.rows || [];
+            const q = `SELECT s.id_solicitud_prestamo,
+               s.id_prestatario,
+               s.id_empleado,
+               s.nro_cuotas,
+               s.monto,
+               s.fecha_envio,
+               s.fecha_respuesta,
+               s.estado,
+               s.id_empleado AS id_empleado_decisor,
+               e.nombre AS empleado_decisor_nombre,
+               e.apellido AS empleado_decisor_apellido,
+               p.nombre AS prest_nombre,
+               p.apellido AS prest_apellido,
+               p.ci AS prest_ci
+             FROM SOLICITUDES_PRESTAMOS s
+             LEFT JOIN EMPLEADOS e ON e.id_empleado = s.id_empleado
+             LEFT JOIN PRESTATARIOS p ON p.id_prestatario = s.id_prestatario
+             ${where}
+             ORDER BY s.id_solicitud_prestamo DESC`;
+            const r = await conn.execute(q, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            return r.rows || [];
     } catch (err) {
       throw new Error(err.message || 'Error listando solicitudes');
     } finally {
