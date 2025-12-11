@@ -4,10 +4,9 @@ const prestamosModel = require('./prestamos.model');
 
 /**
  * Modelo de acceso a datos para SOLICITUDES_REFINANCIACION.
- * Implementa un flujo similar al de SOLICITUDES_PRESTAMOS:
  *  - crearSolicitudRefinanciacion: registra la solicitud en estado PENDIENTE.
  *  - listarSolicitudes / listarPorPrestatario: consulta con filtros.
- *  - aprobarSolicitud: recalcula cuotas del préstamo actual y marca la solicitud como APROBADA.
+ *  - aprobarSolicitud: recalcula cuotas del préstamo y marca la solicitud como APROBADA.
  *  - rechazarSolicitud: marca la solicitud como RECHAZADA (sin tocar el préstamo).
  */
 async function crearSolicitudRefinanciacion({
@@ -46,7 +45,7 @@ async function crearSolicitudRefinanciacion({
     const rPrestamo = await conn.execute(
       qPrestamo,
       { id_prestamo: idPrestamo },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     const prestamo = rPrestamo.rows?.[0];
     if (!prestamo) {
@@ -60,19 +59,19 @@ async function crearSolicitudRefinanciacion({
     // Insertar solicitud en estado PENDIENTE usando secuencia o trigger.
     let idSolicitud = null;
 
-    // Intentar secuencia explícita primero (según Esquemas/secuencias.sql)
     try {
+      // 1) Intentar con secuencia explícita
       const seqSql =
         'SELECT SOLICITUDES_REFINANCIACION_SEQ.NEXTVAL AS ID FROM DUAL';
       const rSeq = await conn.execute(
         seqSql,
         {},
-        { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false }
       );
       const nextId = rSeq.rows?.[0]?.ID;
       if (!nextId) {
         throw new Error(
-          'NEXTVAL de secuencia SOLICITUDES_REFINANCIACION_SEQ no disponible',
+          'NEXTVAL de secuencia SOLICITUDES_REFINANCIACION_SEQ no disponible'
         );
       }
 
@@ -100,11 +99,11 @@ async function crearSolicitudRefinanciacion({
           id_prestamo: idPrestamo,
           nro_cuotas: nroCuotas,
         },
-        { autoCommit: true },
+        { autoCommit: true }
       );
       idSolicitud = nextId;
     } catch (seqErr) {
-      // Si la secuencia no existe, confiar en trigger + RETURNING
+      // 2) Si no hay secuencia, confiar en trigger + RETURNING
       const insertSql = `
         INSERT INTO SOLICITUDES_REFINANCIACION (
           id_prestatario,
@@ -118,7 +117,8 @@ async function crearSolicitudRefinanciacion({
           :nro_cuotas,
           SYSDATE,
           'PENDIENTE'
-        ) RETURNING id_solicitud_refinanciacion INTO :id_out`;
+        )
+        RETURNING id_solicitud_refinanciacion INTO :id_out`;
       const rIns = await conn.execute(
         insertSql,
         {
@@ -127,9 +127,8 @@ async function crearSolicitudRefinanciacion({
           nro_cuotas: nroCuotas,
           id_out: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
         },
-        { autoCommit: true },
+        { autoCommit: true }
       );
-      // eslint-disable-next-line prefer-destructuring
       idSolicitud = rIns.outBinds.id_out[0];
     }
 
@@ -139,7 +138,7 @@ async function crearSolicitudRefinanciacion({
     };
   } catch (err) {
     throw new Error(
-      err.message || 'Error creando solicitud de refinanciación',
+      err.message || 'Error creando solicitud de refinanciación'
     );
   } finally {
     await conn.close();
@@ -167,28 +166,44 @@ async function listarSolicitudes(filters = {}) {
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const sql = `
-      SELECT r.id_solicitud_refinanciacion,
-             r.id_prestatario,
-             r.id_prestamo,
-             r.nro_cuotas,
-             r.fecha_realizacion,
-             r.estado,
-             p.id_prestatario   AS ID_PRESTATARIO,
-             p.ci,
-             p.nombre,
-             p.apellido
+      SELECT
+        r.id_solicitud_refinanciacion,
+        r.id_prestatario,
+        r.id_prestamo,
+        r.nro_cuotas,
+        r.fecha_realizacion,
+        r.estado,
+        p.id_prestatario   AS PREST_ID,
+        p.ci               AS PREST_CI,
+        p.nombre           AS PREST_NOMBRE,
+        p.apellido         AS PREST_APELLIDO
       FROM SOLICITUDES_REFINANCIACION r
-      JOIN PRESTATARIOS p
-        ON p.id_prestatario = r.id_prestatario   -- 🔥 JOIN corregido
+      /* LEFT JOIN para NO perder solicitudes aunque la FK esté rara */
+      LEFT JOIN PRESTATARIOS p
+        ON (
+          p.id_prestatario = r.id_prestatario
+          OR p.ci = r.id_prestatario
+        )
       ${where}
       ORDER BY r.id_solicitud_refinanciacion DESC`;
+
     const r = await conn.execute(sql, binds, {
       outFormat: oracledb.OUT_FORMAT_OBJECT,
     });
+
+    // Debug útil mientras probamos
+    // eslint-disable-next-line no-console
+    console.log(
+      '[REFINANCIACIONES] listarSolicitudes filters=',
+      filters,
+      'rows=',
+      r.rows?.length || 0
+    );
+
     return r.rows || [];
   } catch (err) {
     throw new Error(
-      err.message || 'Error listando solicitudes de refinanciación',
+      err.message || 'Error listando solicitudes de refinanciación'
     );
   } finally {
     await conn.close();
@@ -211,23 +226,22 @@ async function obtenerPorId(id_solicitud) {
       throw new Error('id_solicitud inválido');
     }
     const sql = `
-      SELECT r.id_solicitud_refinanciacion,
-             r.id_prestatario,
-             r.id_prestamo,
-             r.nro_cuotas,
-             r.fecha_realizacion,
-             r.estado
+      SELECT
+        r.id_solicitud_refinanciacion,
+        r.id_prestatario,
+        r.id_prestamo,
+        r.nro_cuotas,
+        r.fecha_realizacion,
+        r.estado
       FROM SOLICITUDES_REFINANCIACION r
       WHERE r.id_solicitud_refinanciacion = :id`;
-    const r = await conn.execute(
-      sql,
-      { id },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT },
-    );
+    const r = await conn.execute(sql, { id }, {
+      outFormat: oracledb.OUT_FORMAT_OBJECT,
+    });
     return r.rows?.[0] || null;
   } catch (err) {
     throw new Error(
-      err.message || 'Error obteniendo solicitud de refinanciación',
+      err.message || 'Error obteniendo solicitud de refinanciación'
     );
   } finally {
     await conn.close();
@@ -238,9 +252,9 @@ async function obtenerPorId(id_solicitud) {
  * Aprueba una solicitud de refinanciación:
  *  - Verifica que exista y esté PENDIENTE.
  *  - Verifica que el préstamo asociado esté ACTIVO.
- *  - Elimina las cuotas actuales del préstamo y genera nuevas cuotas con el nuevo número de cuotas.
- *  - Actualiza el préstamo a estado 'REFINANCIADO' y actualiza su número de cuotas.
- *  - Marca la solicitud como 'APROBADA'.
+ *  - Elimina las cuotas actuales del préstamo y genera nuevas cuotas.
+ *  - Actualiza el número de cuotas del préstamo (dejando el estado tal cual, p.ej. ACTIVO).
+ *  - Marca la solicitud como APROBADA.
  */
 async function aprobarSolicitud({ id_solicitud, id_empleado }) {
   const conn = await getConnection();
@@ -250,7 +264,7 @@ async function aprobarSolicitud({ id_solicitud, id_empleado }) {
       throw new Error('id_solicitud inválido');
     }
 
-    // Cargar solicitud
+    // Cargar solicitud (FOR UPDATE)
     const rSol = await conn.execute(
       `SELECT id_solicitud_refinanciacion,
               id_prestatario,
@@ -262,7 +276,7 @@ async function aprobarSolicitud({ id_solicitud, id_empleado }) {
        WHERE id_solicitud_refinanciacion = :id
        FOR UPDATE`,
       { id: idSolicitud },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false }
     );
     const sol = rSol.rows?.[0];
     if (!sol) {
@@ -279,11 +293,11 @@ async function aprobarSolicitud({ id_solicitud, id_empleado }) {
 
     if (!Number.isFinite(idPrestamo) || !Number.isFinite(idPrestatario)) {
       throw new Error(
-        'Datos de préstamo o prestatario inválidos en la solicitud',
+        'Datos de préstamo o prestatario inválidos en la solicitud'
       );
     }
 
-    // Obtener préstamo y validar que esté ACTIVO
+    // Cargar préstamo (FOR UPDATE)
     const rPrestamo = await conn.execute(
       `SELECT id_prestamo,
               id_prestatario,
@@ -297,7 +311,7 @@ async function aprobarSolicitud({ id_solicitud, id_empleado }) {
        WHERE id_prestamo = :id_prestamo
        FOR UPDATE`,
       { id_prestamo: idPrestamo },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false }
     );
     const prestamo = rPrestamo.rows?.[0];
     if (!prestamo) {
@@ -314,14 +328,14 @@ async function aprobarSolicitud({ id_solicitud, id_empleado }) {
       throw new Error('total_prestado inválido en el préstamo asociado');
     }
 
-    // Eliminar cuotas actuales
+    // 1) Borrar cuotas actuales
     await conn.execute(
       `DELETE FROM CUOTAS WHERE id_prestamo = :id_prestamo`,
       { id_prestamo: idPrestamo },
-      { autoCommit: false },
+      { autoCommit: false }
     );
 
-    // Generar nuevas cuotas reutilizando la lógica existente de generación de cuotas.
+    // 2) Generar nuevas cuotas usando lógica existente
     await prestamosModel.generateCuotasTransactional(conn, {
       id_prestamo: idPrestamo,
       id_prestatario: idPrestatario,
@@ -329,26 +343,25 @@ async function aprobarSolicitud({ id_solicitud, id_empleado }) {
       nro_cuotas: nuevoNroCuotas,
     });
 
-    // Actualizar préstamo: nuevo número de cuotas y estado REFINANCIADO.
+    // 3) Actualizar préstamo: SOLO número de cuotas, NO tocamos estado
     await conn.execute(
       `UPDATE PRESTAMOS
-       SET nro_cuotas = :nro_cuotas,
-           estado      = 'REFINANCIADO'
+       SET nro_cuotas = :nro_cuotas
        WHERE id_prestamo = :id_prestamo`,
       {
         nro_cuotas: nuevoNroCuotas,
         id_prestamo: idPrestamo,
       },
-      { autoCommit: false },
+      { autoCommit: false }
     );
 
-    // Marcar solicitud como APROBADA
+    // 4) Marcar solicitud como APROBADA
     await conn.execute(
       `UPDATE SOLICITUDES_REFINANCIACION
        SET estado = 'APROBADA'
        WHERE id_solicitud_refinanciacion = :id`,
       { id: idSolicitud },
-      { autoCommit: false },
+      { autoCommit: false }
     );
 
     await conn.commit();
@@ -363,15 +376,16 @@ async function aprobarSolicitud({ id_solicitud, id_empleado }) {
       },
       prestamo: {
         id_prestamo: prestamo.ID_PRESTAMO ?? prestamo.id_prestamo,
-        id_prestatario:
-          prestamo.ID_PRESTATARIO ?? prestamo.id_prestatario,
+        id_prestatario: prestamo.ID_PRESTATARIO ?? prestamo.id_prestatario,
         total_prestado: totalPrestado,
         nro_cuotas: nuevoNroCuotas,
         interes: prestamo.INTERES ?? prestamo.interes ?? null,
         fecha_emision: prestamo.FECHA_EMISION ?? prestamo.fecha_emision,
         fecha_vencimiento:
           prestamo.FECHA_VENCIMIENTO ?? prestamo.fecha_vencimiento,
-        estado: 'REFINANCIADO',
+        // OJO: dejamos el estado tal cual estaba en la BD (ACTIVO),
+        // no lo cambiamos a REFINANCIADO para no violar el CHECK.
+        estado: estadoPrestamo,
       },
     };
   } catch (err) {
@@ -381,7 +395,7 @@ async function aprobarSolicitud({ id_solicitud, id_empleado }) {
       // noop
     }
     throw new Error(
-      err.message || 'Error aprobando solicitud de refinanciación',
+      err.message || 'Error aprobando solicitud de refinanciación'
     );
   } finally {
     await conn.close();
@@ -410,7 +424,7 @@ async function rechazarSolicitud({ id_solicitud }) {
        WHERE id_solicitud_refinanciacion = :id
        FOR UPDATE`,
       { id: idSolicitud },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: false }
     );
     const sol = rSol.rows?.[0];
     if (!sol) {
@@ -418,9 +432,7 @@ async function rechazarSolicitud({ id_solicitud }) {
     }
     const estadoSol = sol.ESTADO || sol.estado;
     if (estadoSol !== 'PENDIENTE') {
-      throw new Error(
-        'Solo se pueden rechazar solicitudes en estado PENDIENTE',
-      );
+      throw new Error('Solo se pueden rechazar solicitudes en estado PENDIENTE');
     }
 
     await conn.execute(
@@ -428,7 +440,7 @@ async function rechazarSolicitud({ id_solicitud }) {
        SET estado = 'RECHAZADA'
        WHERE id_solicitud_refinanciacion = :id`,
       { id: idSolicitud },
-      { autoCommit: false },
+      { autoCommit: false }
     );
 
     await conn.commit();
@@ -449,7 +461,7 @@ async function rechazarSolicitud({ id_solicitud }) {
       // noop
     }
     throw new Error(
-      err.message || 'Error rechazando solicitud de refinanciación',
+      err.message || 'Error rechazando solicitud de refinanciación'
     );
   } finally {
     await conn.close();
