@@ -240,12 +240,12 @@ module.exports = {
       const id_prestatario = rPrestatario.rows[0].ID_PRESTATARIO ?? rPrestatario.rows[0].id_prestatario;
 
       // 3.2 Obtener préstamos del prestatario
-                        const qPrestamos = `
-                     SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
-                       p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
-                     FROM PRESTAMOS p
-                     WHERE p.ID_PRESTATARIO = :id_prestatario
-                     ORDER BY p.ID_PRESTAMO DESC`;
+      const qPrestamos = `
+        SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
+               p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
+        FROM PRESTAMOS p
+        WHERE p.ID_PRESTATARIO = :id_prestatario
+        ORDER BY p.ID_PRESTAMO DESC`;
       const rPrestamos = await conn.execute(qPrestamos, { id_prestatario }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
       // 3.3 Resumen de cuotas por vista
@@ -282,10 +282,14 @@ module.exports = {
   findByPrestatarioId: async (id_prestatario) => {
     const conn = await getConnection();
     try {
+      const id = Number(id_prestatario);
+      if (!Number.isFinite(id)) {
+        throw new Error('id_prestatario inválido');
+      }
       const qPrestatario = `SELECT ci FROM prestatarios WHERE id_prestatario = :id_prestatario`;
       const rPrestatario = await conn.execute(
         qPrestatario,
-        { id_prestatario },
+        { id_prestatario: id },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
       if (!rPrestatario.rows?.length) {
@@ -293,15 +297,16 @@ module.exports = {
       }
       const ci = rPrestatario.rows[0].CI ?? rPrestatario.rows[0].ci;
 
-                        const qPrestamos = `
-                     SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
-                       p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
-                     FROM PRESTAMOS p
-                     WHERE p.ID_PRESTATARIO = :id_prestatario
-                     ORDER BY p.ID_PRESTAMO DESC`;
+      const qPrestamos = `
+        SELECT p.ID_PRESTAMO, p.ID_SOLICITUD_PRESTAMO, p.ID_PRESTATARIO, p.TOTAL_PRESTADO, p.NRO_CUOTAS,
+               p.INTERES, p.FECHA_EMISION, p.FECHA_VENCIMIENTO, p.ESTADO
+        FROM PRESTAMOS p
+        WHERE p.ID_PRESTATARIO = :id_prestatario
+          AND p.ESTADO <> 'CANCELADO'
+        ORDER BY p.ID_PRESTAMO DESC`;
       const rPrestamos = await conn.execute(
         qPrestamos,
-        { id_prestatario },
+        { id_prestatario: id },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
 
@@ -316,7 +321,7 @@ module.exports = {
       try {
         rCuotas = await conn.execute(
           qCuotas,
-          { id_prestatario },
+          { id_prestatario: id },
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
       } catch (err) {
@@ -343,10 +348,23 @@ module.exports = {
     const conn = await getConnection();
     try {
       const q = `
-        SELECT ID_PRESTAMO, ID_SOLICITUD_PRESTAMO, ID_PRESTATARIO, TOTAL_PRESTADO, NRO_CUOTAS,
-               INTERES, FECHA_EMISION, FECHA_VENCIMIENTO, ESTADO
-        FROM PRESTAMOS
-        ORDER BY ID_PRESTAMO DESC`;
+        SELECT p.ID_PRESTAMO,
+               p.ID_SOLICITUD_PRESTAMO,
+               p.ID_PRESTATARIO,
+               pr.CI,
+               pr.NOMBRE,
+               pr.APELLIDO,
+               pr.NOMBRE || ' ' || pr.APELLIDO AS NOMBRE_PRESTATARIO,
+               p.TOTAL_PRESTADO,
+               p.NRO_CUOTAS,
+               p.INTERES,
+               p.FECHA_EMISION,
+               p.FECHA_VENCIMIENTO,
+               p.ESTADO
+        FROM PRESTAMOS p
+        JOIN PRESTATARIOS pr
+          ON pr.ID_PRESTATARIO = p.ID_PRESTATARIO
+        ORDER BY p.ID_PRESTAMO DESC`;
       const r = await conn.execute(q, {}, { outFormat: oracledb.OUT_FORMAT_OBJECT });
       return r.rows || [];
     } catch (err) {

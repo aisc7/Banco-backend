@@ -3,6 +3,11 @@ const router = express.Router();
 
 const controller = require('../controllers/empleados.controller');
 const auditoria = require('../middlewares/auditoria');
+const auth = require('../middlewares/auth');
+const requireRole = require('../middlewares/requireRole');
+
+// Perfil del empleado autenticado
+router.get('/me', auth, requireRole('EMPLEADO'), controller.getMe);
 
 // Crear empleado
 router.post('/', auditoria('EMPLEADOS','INSERT'), controller.crear);

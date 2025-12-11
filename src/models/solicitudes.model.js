@@ -109,11 +109,26 @@ module.exports = {
   listarPorPrestatario: async (id_prestatario) => {
     const conn = await getConnection();
     try {
-      const q = `SELECT id_solicitud_prestamo, id_prestatario, id_empleado, nro_cuotas, monto, fecha_envio, fecha_respuesta, estado
-             FROM SOLICITUDES_PRESTAMOS
-             WHERE id_prestatario = :id
-             ORDER BY id_solicitud_prestamo DESC`;
-      const r = await conn.execute(q, { id: id_prestatario }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const id = Number(id_prestatario);
+      if (!Number.isFinite(id)) {
+        throw new Error('id_prestatario inválido');
+      }
+      const q = `SELECT s.id_solicitud_prestamo,
+                        s.id_prestatario,
+                        s.id_empleado,
+                        s.nro_cuotas,
+                        s.monto,
+                        s.fecha_envio,
+                        s.fecha_respuesta,
+                        s.estado,
+                        s.id_empleado AS id_empleado_decisor,
+                        e.nombre AS empleado_decisor_nombre,
+                        e.apellido AS empleado_decisor_apellido
+                 FROM SOLICITUDES_PRESTAMOS s
+                 LEFT JOIN EMPLEADOS e ON e.id_empleado = s.id_empleado
+                 WHERE s.id_prestatario = :id
+                 ORDER BY s.id_solicitud_prestamo DESC`;
+      const r = await conn.execute(q, { id }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
       return r.rows || [];
     } catch (err) {
       throw new Error(err.message || 'Error listando solicitudes');
@@ -124,8 +139,16 @@ module.exports = {
   obtenerPorId: async (id) => {
     const conn = await getConnection();
     try {
-      const q = `SELECT id_solicitud_prestamo, id_prestatario, id_empleado, nro_cuotas, monto, fecha_envio, fecha_respuesta, estado
-             FROM SOLICITUDES_PRESTAMOS WHERE id_solicitud_prestamo = :id`;
+      const q = `SELECT id_solicitud_prestamo,
+                        id_prestatario,
+                        id_empleado,
+                        nro_cuotas,
+                        monto,
+                        fecha_envio,
+                        fecha_respuesta,
+                        estado
+                 FROM SOLICITUDES_PRESTAMOS
+                 WHERE id_solicitud_prestamo = :id`;
       const r = await conn.execute(q, { id }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
       return r.rows?.[0] || null;
     } catch (err) {
@@ -148,10 +171,21 @@ module.exports = {
         binds.id_prestatario = Number(filters.id_prestatario);
       }
       const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-      const q = `SELECT id_solicitud_prestamo, id_prestatario, id_empleado, nro_cuotas, monto, fecha_envio, fecha_respuesta, estado
-                 FROM SOLICITUDES_PRESTAMOS
+      const q = `SELECT s.id_solicitud_prestamo,
+                        s.id_prestatario,
+                        s.id_empleado,
+                        s.nro_cuotas,
+                        s.monto,
+                        s.fecha_envio,
+                        s.fecha_respuesta,
+                        s.estado,
+                        s.id_empleado AS id_empleado_decisor,
+                        e.nombre AS empleado_decisor_nombre,
+                        e.apellido AS empleado_decisor_apellido
+                 FROM SOLICITUDES_PRESTAMOS s
+                 LEFT JOIN EMPLEADOS e ON e.id_empleado = s.id_empleado
                  ${where}
-                 ORDER BY id_solicitud_prestamo DESC`;
+                 ORDER BY s.id_solicitud_prestamo DESC`;
       const r = await conn.execute(q, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
       return r.rows || [];
     } catch (err) {
@@ -160,11 +194,29 @@ module.exports = {
       await conn.close();
     }
   },
-  actualizarEstado: async (id, estado, motivo) => {
+  /**
+   * Actualiza el estado de una solicitud y registra el empleado que toma la decisión.
+   * Este helper puede ser reutilizado desde flujos de aprobación/rechazo si se requiere
+   * un camino simplificado fuera de la lógica transaccional de préstamos.
+   */
+  actualizarEstado: async (id, estado, motivo, id_empleado) => {
     const conn = await getConnection();
     try {
-      const sql = `UPDATE SOLICITUDES_PRESTAMOS SET estado = :estado, fecha_respuesta = SYSDATE WHERE id_solicitud_prestamo = :id`;
-      const r = await conn.execute(sql, { id, estado, motivo: motivo || null }, { autoCommit: true });
+      const sql = `UPDATE SOLICITUDES_PRESTAMOS
+                   SET estado = :estado,
+                       fecha_respuesta = SYSDATE,
+                       id_empleado = :id_empleado
+                   WHERE id_solicitud_prestamo = :id`;
+      const r = await conn.execute(
+        sql,
+        {
+          id,
+          estado,
+          motivo: motivo || null,
+          id_empleado: id_empleado ?? null,
+        },
+        { autoCommit: true }
+      );
       if (r.rowsAffected === 0) throw new Error('Solicitud no encontrada');
       return { id_solicitud_prestamo: id, estado };
     } catch (err) {

@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+console.log('>>> cargando rutas de SOLICITUDES'); 
+console.log(">>> SOLICITUDES ROUTES FILE CARGADO:", __filename);
+
 
 const controller = require('../controllers/solicitudes.controller');
 const auth = require('../middlewares/auth');

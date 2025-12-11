@@ -70,10 +70,18 @@ module.exports = {
   },
   misPrestamos: async (req, res) => {
     try {
-      const idPrestatario = req.user?.id_prestatario || req.user?.ID_PRESTATARIO || null;
-      if (!idPrestatario) {
-        return res.status(403).json({ ok: false, error: 'Cuenta no vinculada a prestatario' });
+      const rawId = req.user && (req.user.id_prestatario ?? req.user.ID_PRESTATARIO);
+      const idPrestatario = Number(rawId);
+
+      if (!rawId || Number.isNaN(idPrestatario)) {
+        // eslint-disable-next-line no-console
+        console.error('[MIS-PRESTAMOS] id_prestatario inválido en token:', rawId);
+        return res.status(400).json({
+          ok: false,
+          error: 'id_prestatario inválido en el token de autenticación',
+        });
       }
+
       const result = await service.obtenerPorPrestatarioPorId(idPrestatario);
       return res.json({ ok: true, result });
     } catch (err) {
@@ -101,7 +109,22 @@ module.exports = {
   },
   actualizar: async (req, res) => {
     try {
-      const result = await service.actualizar(Number(req.params.idPrestamo), req.body);
+      const idPrestamo = Number(req.params.idPrestamo);
+      const payload = { ...req.body };
+
+      if ('estado' in payload && payload.estado != null) {
+        const allowed = ['PENDIENTE', 'ACTIVO', 'CANCELADO', 'COMPLETADO'];
+        const estado = String(payload.estado).toUpperCase();
+        if (!allowed.includes(estado)) {
+          return res.status(400).json({
+            ok: false,
+            error: `Estado inválido. Valores permitidos: ${allowed.join(', ')}`,
+          });
+        }
+        payload.estado = estado;
+      }
+
+      const result = await service.actualizar(idPrestamo, payload);
       res.json({ ok: true, result });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });

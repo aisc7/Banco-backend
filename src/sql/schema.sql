@@ -123,7 +123,7 @@ CREATE TABLE PRESTAMOS (
     fecha_emision DATE DEFAULT SYSDATE,
     fecha_vencimiento DATE,
     estado VARCHAR2(20) DEFAULT 'PENDIENTE' NOT NULL
-        CHECK (estado IN ('PENDIENTE','ACTIVO','CANCELADO')),
+        CHECK (estado IN ('PENDIENTE','ACTIVO','CANCELADO','COMPLETADO')),
 
     CONSTRAINT fk_pr_solicitud
         FOREIGN KEY (id_solicitud_prestamo) REFERENCES SOLICITUDES_PRESTAMOS(id_solicitud_prestamo),

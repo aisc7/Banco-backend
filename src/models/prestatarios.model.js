@@ -140,6 +140,43 @@ module.exports = {
       await conn.close();
     }
   },
+  getById: async (id_prestatario) => {
+    const conn = await getConnection();
+    try {
+      const result = await conn.execute(
+        `SELECT id_prestatario, ci, nombre, apellido, direccion, email, telefono,
+                TO_CHAR(fecha_nacimiento,'YYYY-MM-DD') AS fecha_nacimiento,
+                estado_cliente, TO_CHAR(fecha_registro,'YYYY-MM-DD HH24:MI:SS') AS fecha_registro,
+                usuario_registro, foto
+         FROM PRESTATARIOS WHERE id_prestatario = :id`,
+        { id: Number(id_prestatario) },
+        {
+          outFormat: oracledb.OUT_FORMAT_OBJECT,
+          fetchInfo: {
+            FOTO: { type: oracledb.BUFFER },
+          },
+        }
+      );
+      if (!result.rows || result.rows.length === 0) {
+        throw new Error('Prestatario no encontrado');
+      }
+      const row = result.rows[0];
+      let fotoBase64 = null;
+      if (row.FOTO) {
+        try {
+          fotoBase64 = Buffer.from(row.FOTO).toString('base64');
+        } catch {
+          fotoBase64 = null;
+        }
+      }
+      return {
+        ...row,
+        FOTO_BASE64: fotoBase64,
+      };
+    } finally {
+      await conn.close();
+    }
+  },
   listAll: async () => {
     const conn = await getConnection();
     try {
@@ -179,27 +216,115 @@ module.exports = {
       const idLog = logIns.outBinds.id_out[0];
 
       const lines = text.split(/\r?\n/).filter(l => l.trim().length);
-      let total = lines.length;
-      let aceptados = 0;
-      let rechazados = 0;
-      const detalles = [];
+      // eslint-disable-next-line no-console
+      console.log('[CARGA-MASIVA] líneas recibidas (no vacías):', lines.length);
 
-      for (const [idx, line] of lines.entries()) {
+      // Arrays de trabajo: filas aceptadas para inserción y filas rechazadas para el resumen.
+      const acceptedRows = [];
+      const rejectedRows = [];
+      let total = 0;
+      const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+      for (const [idx, rawLine] of lines.entries()) {
         const lineaNum = idx + 1;
-        const parts = line.split(/[,;\t]/).map(s => s.trim());
-        if (parts.length < 9) {
-          rechazados++;
-          detalles.push({ linea: lineaNum, motivo: 'Estructura inválida' });
-          await conn.execute(
-            `INSERT INTO CARGA_CLIENTES_DETALLE (linea, id_log_fk, estado, descripcion_error, ci, nombre, telefono)
-             VALUES (:linea, :id_log_fk, 'RECHAZADA', :descripcion_error, NULL, NULL, NULL)`,
-            { linea: lineaNum, id_log_fk: idLog, descripcion_error: 'Estructura inválida' },
-            { autoCommit: true }
-          );
+        const lower = rawLine.toLowerCase();
+        // Saltar cabeceras típicas (ej: "ci,nombre,apellido,...").
+        if (idx === 0 && (lower.startsWith('ci,') || lower.startsWith('ci;') || lower.startsWith('ci\t'))) {
+          // eslint-disable-next-line no-continue
           continue;
         }
-        const [ci,nombre,apellido,direccion,email,telefono,fecha_nacimiento,estado_cliente,usuario_registro] = parts;
-        let descripcionError = null;
+
+        total += 1;
+
+        const parts = rawLine.split(/[,;\t]/).map(s => s.trim());
+        if (parts.length !== 9) {
+          // Rechazo por número de columnas incorrecto.
+          rejectedRows.push({
+            linea: lineaNum,
+            contenido: rawLine,
+            ci: null,
+            nombre: null,
+            telefono: null,
+            motivo: 'Número de columnas inválido',
+          });
+          // eslint-disable-next-line no-continue
+          continue;
+        }
+
+        const [ci, nombre, apellido, direccion, email, telefono, fecha_nacimiento, estado_cliente] = parts;
+        const ciRaw = (ci || '').toString().trim();
+        const nombreTrim = (nombre || '').trim();
+        const telefonoTrim = (telefono || '').toString().trim();
+        const fechaTrim = (fecha_nacimiento || '').toString().trim();
+        const baseInfo = {
+          linea: lineaNum,
+          contenido: rawLine,
+          ci: ciRaw || null,
+          nombre: nombreTrim || null,
+          telefono: telefonoTrim || null,
+        };
+
+        // Validación de CI obligatorio y numérico antes de armar acceptedRows.
+        if (!ciRaw || Number.isNaN(Number(ciRaw))) {
+          rejectedRows.push({
+            ...baseInfo,
+            motivo: 'CI vacío o inválido',
+          });
+          // eslint-disable-next-line no-continue
+          continue;
+        }
+
+        // Validación de longitud de TELEFONO (no vacío y máximo 20 caracteres).
+        if (!telefonoTrim) {
+          rejectedRows.push({
+            ...baseInfo,
+            motivo: 'Teléfono vacío o inválido',
+          });
+          // eslint-disable-next-line no-continue
+          continue;
+        }
+        if (telefonoTrim.length > 20) {
+          rejectedRows.push({
+            ...baseInfo,
+            motivo: 'Teléfono demasiado largo (máx 20 caracteres)',
+          });
+          // eslint-disable-next-line no-continue
+          continue;
+        }
+
+        // Validación de formato de fecha de nacimiento (YYYY-MM-DD).
+        if (!DATE_REGEX.test(fechaTrim)) {
+          rejectedRows.push({
+            ...baseInfo,
+            motivo: 'fecha_nacimiento inválida (usa YYYY-MM-DD)',
+          });
+          // eslint-disable-next-line no-continue
+          continue;
+        }
+
+        // Si pasa todas las validaciones, se agrega a acceptedRows para inserción posterior.
+        acceptedRows.push({
+          linea: lineaNum,
+          CI: ciRaw,
+          NOMBRE: nombreTrim,
+          APELLIDO: (apellido || '').trim(),
+          DIRECCION: (direccion || '').trim(),
+          EMAIL: (email || '').trim(),
+          TELEFONO: telefonoTrim,
+          FECHA_NACIMIENTO: fechaTrim,
+          ESTADO_CLIENTE: (estado_cliente || '').trim(),
+          USUARIO_REGISTRO: usuario,
+        });
+      }
+
+      // eslint-disable-next-line no-console
+      console.log('[CARGA-MASIVA] registros válidos:', acceptedRows.length);
+      // eslint-disable-next-line no-console
+      console.log('[CARGA-MASIVA] registros rechazados por validación:', rejectedRows.length);
+
+      // Inserción de filas válidas en PRESTATARIOS y en CARGA_CLIENTES_DETALLE como ACEPATADAS.
+      for (const row of acceptedRows) {
+        const ciNumber = Number(row.CI);
         try {
           await conn.execute(
             `INSERT INTO PRESTATARIOS (
@@ -209,28 +334,63 @@ module.exports = {
               :ci, :nombre, :apellido, :direccion, :email, :telefono, TO_DATE(:fecha_nacimiento,'YYYY-MM-DD'),
               :estado_cliente, SYSDATE, :usuario_registro
             )`,
-            { ci: Number(ci), nombre, apellido, direccion, email, telefono, fecha_nacimiento, estado_cliente, usuario_registro },
+            {
+              ci: ciNumber,
+              nombre: row.NOMBRE,
+              apellido: row.APELLIDO,
+              direccion: row.DIRECCION,
+              email: row.EMAIL,
+              telefono: row.TELEFONO,
+              fecha_nacimiento: row.FECHA_NACIMIENTO,
+              estado_cliente: row.ESTADO_CLIENTE,
+              usuario_registro: row.USUARIO_REGISTRO,
+            },
             { autoCommit: true }
           );
-          aceptados++;
+
           await conn.execute(
             `INSERT INTO CARGA_CLIENTES_DETALLE (linea, id_log_fk, estado, descripcion_error, ci, nombre, telefono)
              VALUES (:linea, :id_log_fk, 'ACEPTADA', NULL, :ci, :nombre, :telefono)`,
-            { linea: lineaNum, id_log_fk: idLog, ci: Number(ci), nombre, telefono },
+            {
+              linea: row.linea,
+              id_log_fk: idLog,
+              ci: ciNumber,
+              nombre: row.NOMBRE,
+              telefono: row.TELEFONO,
+            },
             { autoCommit: true }
           );
         } catch (err) {
-          rechazados++;
-          descripcionError = err && err.errorNum === 1 ? 'Cédula duplicada' : (err.message || 'Error desconocido');
-          detalles.push({ linea: lineaNum, motivo: descripcionError });
-          await conn.execute(
-            `INSERT INTO CARGA_CLIENTES_DETALLE (linea, id_log_fk, estado, descripcion_error, ci, nombre, telefono)
-             VALUES (:linea, :id_log_fk, 'RECHAZADA', :descripcion_error, :ci, :nombre, :telefono)`,
-            { linea: lineaNum, id_log_fk: idLog, descripcion_error: descripcionError, ci: Number(ci), nombre, telefono },
-            { autoCommit: true }
-          );
+          const e = new Error('Error insertando registros de carga masiva');
+          e.originalError = err;
+          throw e;
         }
       }
+
+      // Inserción de filas rechazadas en CARGA_CLIENTES_DETALLE como RECHAZADAS (sin tocar PRESTATARIOS).
+      for (const rej of rejectedRows) {
+        const ciDb = rej.ci && !Number.isNaN(Number(rej.ci)) ? Number(rej.ci) : 0;
+        const telefonoDb =
+          typeof rej.telefono === 'string'
+            ? rej.telefono.slice(0, 20)
+            : null;
+        await conn.execute(
+          `INSERT INTO CARGA_CLIENTES_DETALLE (linea, id_log_fk, estado, descripcion_error, ci, nombre, telefono)
+           VALUES (:linea, :id_log_fk, 'RECHAZADA', :descripcion_error, :ci, :nombre, :telefono)`,
+          {
+            linea: rej.linea,
+            id_log_fk: idLog,
+            descripcion_error: rej.motivo,
+            ci: ciDb,
+            nombre: rej.nombre || null,
+            telefono: telefonoDb,
+          },
+          { autoCommit: true }
+        );
+      }
+
+      const aceptados = acceptedRows.length;
+      const rechazados = rejectedRows.length;
 
       await conn.execute(
         `UPDATE LOG_CARGA_CLIENTES
@@ -240,7 +400,26 @@ module.exports = {
         { autoCommit: true }
       );
 
+      // eslint-disable-next-line no-console
+      console.log('[CARGA-MASIVA] resumen en modelo:', {
+        total,
+        aceptados,
+        rechazados,
+        id_log_pk: idLog,
+      });
+
+      const detalles = rejectedRows.map(r => ({
+        linea: r.linea,
+        ci: r.ci || null,
+        motivo: r.motivo,
+        contenido: r.contenido,
+      }));
+
       return { total, aceptados, rechazados, detalles, id_log_pk: idLog };
+    } catch (err) {
+      const e = new Error(err.message || 'Error procesando carga masiva de prestatarios');
+      e.originalError = err;
+      throw e;
     } finally {
       await conn.close();
     }

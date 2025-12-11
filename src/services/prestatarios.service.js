@@ -36,6 +36,9 @@ module.exports = {
   obtenerPorCedula: async (ci) => {
     return model.getByCedula(ci);
   },
+  obtenerPorId: async (id) => {
+    return model.getById(id);
+  },
   listar: async () => {
     return model.listAll();
   },

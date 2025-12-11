@@ -11,8 +11,14 @@ const prestamosModel = require('../models/prestamos.model');
 // Crear préstamo (prestatario autenticado puede crear su solicitud; empleados pueden crear para cualquiera)
 router.post('/', auth, auditoria('PRESTAMOS','INSERT'), controller.crear);
 
-// Registrar refinanciación
-router.post('/:idPrestamo/refinanciaciones', auditoria('SOLICITUDES_REFINANCIACION','INSERT'), controller.registrarRefinanciacion);
+// Registrar refinanciación (solo empleados)
+router.post(
+  '/:idPrestamo/refinanciaciones',
+  auth,
+  requireRole('EMPLEADO'),
+  auditoria('SOLICITUDES_REFINANCIACION','INSERT'),
+  controller.registrarRefinanciacion
+);
 
 // Obtener préstamos por prestatario (empleado o propietario)
 router.get(

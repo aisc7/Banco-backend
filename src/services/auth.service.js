@@ -1,10 +1,10 @@
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const usersModel = require('../models/users.model');
 const prestatariosModel = require('../models/prestatarios.model');
 const empleadosModel = require('../models/empleados.model');
 const { getConnection } = require('../config/oracle');
 const oracledb = require('oracledb');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 
 /**
  * Servicio de autenticación: login, creación mínima de usuarios
@@ -18,20 +18,68 @@ const getSaltRounds = () => {
 
 module.exports = {
   login: async (username, password) => {
-    const user = await usersModel.findByUsername(username);
-    if (!user) throw new Error('Usuario o contraseña inválidos');
+    // Logs ANTES de cualquier throw
+    // eslint-disable-next-line no-console
+    console.log('[LOGIN] username recibido:', username);
 
-    const ok = await bcrypt.compare(password, user.PASSWORD_HASH || user.password_hash);
-    if (!ok) throw new Error('Usuario o contraseña inválidos');
+    const user = await usersModel.findByUsername(username);
+
+    // eslint-disable-next-line no-console
+    console.log('[LOGIN] usuario encontrado:', !!user, user && {
+      id: user.ID_USUARIO || user.id,
+      username: user.USERNAME || user.username,
+      role: user.ROLE || user.role,
+    });
+
+    if (!user) {
+      // eslint-disable-next-line no-console
+      console.log('[LOGIN] user es null para username:', username);
+      throw new Error('Usuario o contraseña inválidos');
+    }
+
+    const passwordHash = user.PASSWORD_HASH || user.password_hash;
+
+    // eslint-disable-next-line no-console
+    console.log('[LOGIN] passwordHash existe?', !!passwordHash);
+
+    if (!passwordHash) {
+      // eslint-disable-next-line no-console
+      console.error('[LOGIN] Usuario sin password_hash en DB:', {
+        id: user.ID_USUARIO || user.id,
+        username: user.USERNAME || user.username,
+        role: user.ROLE || user.role,
+      });
+      throw new Error('Usuario o contraseña inválidos');
+    }
+
+    const ok = await bcrypt.compare(password, String(passwordHash));
+
+    // eslint-disable-next-line no-console
+    console.log('[LOGIN] resultado bcrypt.compare:', ok);
+
+    if (!ok) {
+      // eslint-disable-next-line no-console
+      console.warn('[LOGIN] Password incorrecto para usuario:', {
+        id: user.ID_USUARIO || user.id,
+        username: user.USERNAME || user.username,
+      });
+      throw new Error('Usuario o contraseña inválidos');
+    }
 
     const payload = {
-      id: user.ID || user.ID_USUARIO || user.id,
+      id: user.ID_USUARIO || user.ID || user.id,
       username: user.USERNAME || user.username,
       role: user.ROLE || user.role,
       id_prestatario: user.ID_PRESTATARIO || user.id_prestatario || null,
       id_empleado: user.ID_EMPLEADO || user.id_empleado || null,
     };
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'dev_secret', { expiresIn: process.env.JWT_EXPIRY || '1h' });
+
+    const token = jwt.sign(
+      payload,
+      process.env.JWT_SECRET || 'dev_secret',
+      { expiresIn: process.env.JWT_EXPIRY || '1h' },
+    );
+
     return token;
   },
 
@@ -171,21 +219,7 @@ module.exports = {
       // 1) Insertar empleado y obtener id_empleado
       let id_empleado;
       try {
-        const sql = `INSERT INTO EMPLEADOS (nombre, apellido, cargo, salario, edad)
-                     VALUES (:nombre, :apellido, :cargo, :salario, :edad)
-                     RETURNING id_empleado INTO :id_out`;
-
-        const binds = {
-          nombre: empleado.nombre,
-          apellido: empleado.apellido,
-          cargo: empleado.cargo ?? null,
-          salario: empleado.salario ?? null,
-          edad: empleado.edad ?? null,
-          id_out: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-        };
-
-        const result = await conn.execute(sql, binds, { autoCommit: false });
-        id_empleado = result.outBinds.id_out[0];
+        id_empleado = await empleadosModel.createEmpleadoWithConnection(conn, empleado);
       } catch (err) {
         // ORA-00001 unique constraint violated (si hubiera alguna constraint relevante)
         if (err && err.errorNum === 1) {

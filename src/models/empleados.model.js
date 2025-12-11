@@ -6,6 +6,35 @@ const { getConnection } = require('../config/oracle');
  * Contiene operaciones CRUD usando la conexión de Oracle y bind params.
  */
 module.exports = {
+  /**
+   * Crea un empleado reutilizando una conexión existente.
+   * No hace commit; el caller es responsable de confirmar o deshacer la transacción.
+   */
+  createEmpleadoWithConnection: async (conn, data) => {
+    const { nombre, apellido, cargo, salario, edad } = data;
+
+    if (!nombre || !apellido) {
+      throw new Error('Campos obligatorios faltantes: nombre, apellido');
+    }
+
+    const sql = `INSERT INTO EMPLEADOS (nombre, apellido, cargo, salario, edad)
+                 VALUES (:nombre, :apellido, :cargo, :salario, :edad)
+                 RETURNING id_empleado INTO :id_out`;
+
+    const binds = {
+      nombre,
+      apellido,
+      cargo: cargo ?? null,
+      salario: salario ?? null,
+      edad: edad ?? null,
+      id_out: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+    };
+
+    const result = await conn.execute(sql, binds, { autoCommit: false });
+    const id = result.outBinds && result.outBinds.id_out ? result.outBinds.id_out[0] : null;
+    return id;
+  },
+
   // Crea un empleado. No se proporciona id_empleado en el INSERT (trigger/sequence en BD).
   createEmpleado: async (data) => {
     const { nombre, apellido, cargo, salario, edad } = data;

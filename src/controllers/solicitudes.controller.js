@@ -31,12 +31,31 @@ module.exports = {
   },
   misSolicitudes: async (req, res) => {
     try {
-      const idPrestatario = req.user?.id_prestatario || req.user?.ID_PRESTATARIO || null;
-      if (!idPrestatario) return res.status(403).json({ ok: false, error: 'Cuenta no vinculada a prestatario' });
+      const rawId =
+        req.user &&
+        (req.user.id_prestatario ??
+          req.user.ID_PRESTATARIO ??
+          req.user.idPrestatario);
+      const idPrestatario = Number(rawId);
+
+      if (!rawId || Number.isNaN(idPrestatario)) {
+        // eslint-disable-next-line no-console
+        console.error('[MIS-SOLICITUDES] id_prestatario inválido en token:', rawId);
+        return res.status(400).json({
+          ok: false,
+          error: 'id_prestatario inválido en el token de autenticación',
+        });
+      }
+
       const result = await service.listarPorPrestatario(idPrestatario);
-      res.json({ ok: true, result });
+      return res.json({ ok: true, result });
     } catch (err) {
-      res.status(400).json({ ok: false, error: err.message });
+      // eslint-disable-next-line no-console
+      console.error('[MIS-SOLICITUDES] Error general:', err);
+      return res.status(500).json({
+        ok: false,
+        error: 'Error interno al obtener tus solicitudes. Intenta nuevamente más tarde.',
+      });
     }
   },
   listar: async (req, res) => {
@@ -54,7 +73,22 @@ module.exports = {
   aprobar: async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const result = await service.aprobar(id);
+      const rawEmpleadoId = req.user && (req.user.id_empleado ?? req.user.ID_EMPLEADO);
+      const idEmpleadoDecisor = Number(rawEmpleadoId);
+
+      if (!rawEmpleadoId || Number.isNaN(idEmpleadoDecisor)) {
+        // eslint-disable-next-line no-console
+        console.error('[SOLICITUDES-APROBAR] id_empleado inválido en token:', rawEmpleadoId);
+        return res.status(400).json({
+          ok: false,
+          error: 'id_empleado inválido en el token de autenticación',
+        });
+      }
+
+      // eslint-disable-next-line no-console
+      console.log('[SOLICITUDES-APROBAR] id_empleado_decisor:', idEmpleadoDecisor);
+
+      const result = await service.aprobar(id, idEmpleadoDecisor);
       res.json({ ok: true, result });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
@@ -64,7 +98,22 @@ module.exports = {
     try {
       const id = Number(req.params.id);
       const motivo = req.body?.motivo || null;
-      const result = await service.rechazar(id, motivo);
+      const rawEmpleadoId = req.user && (req.user.id_empleado ?? req.user.ID_EMPLEADO);
+      const idEmpleadoDecisor = Number(rawEmpleadoId);
+
+      if (!rawEmpleadoId || Number.isNaN(idEmpleadoDecisor)) {
+        // eslint-disable-next-line no-console
+        console.error('[SOLICITUDES-RECHAZAR] id_empleado inválido en token:', rawEmpleadoId);
+        return res.status(400).json({
+          ok: false,
+          error: 'id_empleado inválido en el token de autenticación',
+        });
+      }
+
+      // eslint-disable-next-line no-console
+      console.log('[SOLICITUDES-RECHAZAR] id_empleado_decisor:', idEmpleadoDecisor);
+
+      const result = await service.rechazar(id, motivo, idEmpleadoDecisor);
       res.json({ ok: true, result });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });

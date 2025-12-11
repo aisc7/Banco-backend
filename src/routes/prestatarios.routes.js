@@ -10,6 +10,9 @@ const requireRole = require('../middlewares/requireRole');
 const allowEmployeeOrOwner = require('../middlewares/allowEmployeeOrOwner');
 const prestatariosModel = require('../models/prestatarios.model');
 
+// Perfil del prestatario autenticado
+router.get('/me', auth, requireRole('PRESTATARIO'), controller.getMe);
+
 // Registrar cliente (público)
 router.post('/', auditoria('PRESTATARIOS','INSERT'), validateCedula, controller.registrar);
 

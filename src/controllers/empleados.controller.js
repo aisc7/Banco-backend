@@ -66,4 +66,29 @@ module.exports = {
       res.status(500).json({ success: false, data: null, message: err.message });
     }
   },
+
+  /**
+   * Devuelve los datos del empleado asociado al usuario autenticado.
+   * Usa id_empleado del token JWT.
+   */
+  getMe: async (req, res) => {
+    try {
+      const rawId = req.user && (req.user.id_empleado ?? req.user.ID_EMPLEADO);
+      const idEmpleado = Number(rawId);
+      if (!rawId || Number.isNaN(idEmpleado)) {
+        return res.status(400).json({
+          success: false,
+          data: null,
+          message: 'id_empleado inválido en el token de autenticación'
+        });
+      }
+      const result = await service.getById(idEmpleado);
+      if (!result) {
+        return res.status(404).json({ success: false, data: null, message: 'Empleado no encontrado' });
+      }
+      return res.json({ success: true, data: result, message: null });
+    } catch (err) {
+      return res.status(500).json({ success: false, data: null, message: err.message });
+    }
+  },
 };

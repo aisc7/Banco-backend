@@ -4,16 +4,25 @@ const morgan = require('morgan');
 const cors = require('cors');
 const oracle = require('./config/oracle');
 
+console.log('>>> APP FILE:', __filename);
+console.log(
+  '>>> solicitudesRoutes resolved to:',
+  require.resolve('./routes/solicitudes.routes')
+);
+
 // Routes
 const prestatariosRoutes = require('./routes/prestatarios.routes');
 const prestamosRoutes = require('./routes/prestamos.routes');
 const solicitudesRoutes = require('./routes/solicitudes.routes');
-const cuotasRoutes = require('./routes/cuotas.routes');
+const refinanciacionesRoutes = require('./routes/refinanciaciones.routes');
+const cuotasRoutes = require('./routes/cuotas.routes');          
 const reportesRoutes = require('./routes/reportes.routes');
 const notificacionesRoutes = require('./routes/notificaciones.routes');
 const auditoriaRoutes = require('./routes/auditoria.routes');
 const empleadosRoutes = require('./routes/empleados.routes');
 const authRoutes = require('./routes/auth.routes');
+
+
 
 const app = express();
 app.disable('etag');
@@ -50,6 +59,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/prestatarios', prestatariosRoutes);
 app.use('/api/prestamos', prestamosRoutes);
 app.use('/api/solicitudes', solicitudesRoutes);
+app.use('/api/refinanciaciones', refinanciacionesRoutes);
 app.use('/api/cuotas', cuotasRoutes);
 app.use('/api/reportes', reportesRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);

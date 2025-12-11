@@ -1,6 +1,61 @@
 const model = require('../models/solicitudes.model');
 const prestamosModel = require('../models/prestamos.model');
 const { getConnection } = require('../config/oracle');
+const oracledb = require('oracledb');
+const {
+  sendLoanApprovedEmail,
+  sendLoanRejectedEmail,
+} = require('./email.service');
+
+async function obtenerDatosPrestatario(idPrestatario) {
+  const conn = await getConnection();
+  try {
+    const q = `SELECT nombre, apellido, email
+               FROM PRESTATARIOS
+               WHERE id_prestatario = :id`;
+    const r = await conn.execute(q, { id: Number(idPrestatario) }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    return r.rows?.[0] || null;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[SOLICITUDES] Error obteniendo datos de prestatario para correo:', err && err.message);
+    return null;
+  } finally {
+    await conn.close();
+  }
+}
+
+async function enviarCorreoAprobacion({ idPrestatario, idSolicitud, idPrestamo }) {
+  try {
+    const prestatario = await obtenerDatosPrestatario(idPrestatario);
+    if (!prestatario) return;
+
+    const prestamo = await prestamosModel.findById(idPrestamo);
+    const solicitud = await model.obtenerPorId(idSolicitud);
+
+    await sendLoanApprovedEmail({ prestatario, prestamo, solicitud });
+  } catch (err) {
+    // No romper la aprobación si falla el envío de correo.
+    // eslint-disable-next-line no-console
+    console.warn('[SOLICITUDES] Error al enviar correo de aprobación:', err && err.message);
+  }
+}
+
+async function enviarCorreoRechazo({ idPrestatario, idSolicitud, motivo }) {
+  try {
+    const prestatario = await obtenerDatosPrestatario(idPrestatario);
+    if (!prestatario) return;
+
+    const solicitud = await model.obtenerPorId(idSolicitud);
+    if (solicitud) {
+      // Enriquecer la solicitud con el motivo para el template de correo
+      solicitud.MOTIVO_RECHAZO = motivo ?? solicitud.MOTIVO_RECHAZO ?? solicitud.motivo_rechazo ?? null;
+      await sendLoanRejectedEmail({ prestatario, solicitud });
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[SOLICITUDES] Error al enviar correo de rechazo:', err && err.message);
+  }
+}
 
 module.exports = {
   crear: async (data) => {
@@ -13,7 +68,7 @@ module.exports = {
   listar: async (filters) => {
     return model.listar(filters);
   },
-  aprobar: async (idSolicitud) => {
+  aprobar: async (idSolicitud, idEmpleadoDecisor) => {
     // Aprobar solicitud transaccionalmente y crear préstamo + cuotas atómicamente
     const s = await model.obtenerPorId(idSolicitud);
     if (!s) throw new Error('Solicitud no encontrada');
@@ -30,8 +85,13 @@ module.exports = {
 
       // 2) Marcar solicitud como APROBADA dentro de la transacción
       await conn.execute(
-        `UPDATE SOLICITUDES_PRESTAMOS SET estado = 'ACEPTADA', fecha_respuesta = SYSDATE WHERE id_solicitud_prestamo = :id`,
-        { id: idSolicitud },
+        `UPDATE SOLICITUDES_PRESTAMOS
+         SET estado = 'ACEPTADA',
+             fecha_respuesta = SYSDATE,
+             id_empleado_decisor = :id_empleado_decisor,
+             fecha_decision = SYSDATE
+         WHERE id_solicitud_prestamo = :id`,
+        { id: idSolicitud, id_empleado_decisor: idEmpleadoDecisor ?? null },
         { autoCommit: false }
       );
 
@@ -55,7 +115,25 @@ module.exports = {
 
       // 5) Commit
       await conn.commit();
-      return { solicitud: { id_solicitud: idSolicitud, estado: 'ACEPTADA' }, prestamo: { id_prestamo: rPrestamo.id_prestamo } };
+
+      const result = {
+        solicitud: {
+          id_solicitud: idSolicitud,
+          estado: 'ACEPTADA',
+          id_empleado_decisor: idEmpleadoDecisor ?? null,
+          fecha_decision: new Date(),
+        },
+        prestamo: { id_prestamo: rPrestamo.id_prestamo },
+      };
+
+      // Notificación por correo (no bloqueante para el flujo principal)
+      enviarCorreoAprobacion({
+        idPrestatario,
+        idSolicitud,
+        idPrestamo: rPrestamo.id_prestamo,
+      });
+
+      return result;
     } catch (err) {
       try { await conn.rollback(); } catch (_) {}
       throw new Error(err.message || 'Error aprobando solicitud');
@@ -63,19 +141,42 @@ module.exports = {
       await conn.close();
     }
   },
-  rechazar: async (idSolicitud, motivo) => {
+  rechazar: async (idSolicitud, motivo, idEmpleadoDecisor) => {
     const conn = await getConnection();
     try {
       const s = await model.obtenerPorId(idSolicitud);
       if (!s) throw new Error('Solicitud no encontrada');
       if ((s.ESTADO || s.estado) !== 'PENDIENTE') throw new Error('Solo se puede rechazar solicitudes en estado PENDIENTE');
+      const idPrestatario = s.ID_PRESTATARIO || s.id_prestatario;
       await conn.execute(
-        `UPDATE SOLICITUDES_PRESTAMOS SET estado = 'RECHAZADA', fecha_respuesta = SYSDATE WHERE id_solicitud_prestamo = :id`,
-        { id: idSolicitud },
+        `UPDATE SOLICITUDES_PRESTAMOS
+         SET estado = 'RECHAZADA',
+             fecha_respuesta = SYSDATE,
+             id_empleado_decisor = :id_empleado_decisor,
+             fecha_decision = SYSDATE
+         WHERE id_solicitud_prestamo = :id`,
+        { id: idSolicitud, id_empleado_decisor: idEmpleadoDecisor ?? null },
         { autoCommit: false }
       );
       await conn.commit();
-      return { solicitud: { id_solicitud: idSolicitud, estado: 'RECHAZADA', motivo: motivo || null } };
+      const result = {
+        solicitud: {
+          id_solicitud: idSolicitud,
+          estado: 'RECHAZADA',
+          motivo: motivo || null,
+          id_empleado_decisor: idEmpleadoDecisor ?? null,
+          fecha_decision: new Date(),
+        },
+      };
+
+      // Notificación por correo (no bloqueante)
+      enviarCorreoRechazo({
+        idPrestatario,
+        idSolicitud,
+        motivo: motivo || null,
+      });
+
+      return result;
     } catch (err) {
       try { await conn.rollback(); } catch (_) {}
       throw new Error(err.message || 'Error rechazando solicitud');

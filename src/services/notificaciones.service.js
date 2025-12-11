@@ -19,4 +19,7 @@ module.exports = {
   listarHistorico: async () => {
     return model.listarHistorico();
   },
+  crearNotificacion: async (data) => {
+    return model.crearNotificacion(data);
+  },
 };
